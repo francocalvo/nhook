@@ -46,6 +46,15 @@ Automatically syncs the `Cronograma` relation in Gastos entries when the `Date` 
 | Set to date range | Links all Cronograma entries in range |
 | Cleared | Removes all Cronograma relations |
 
+### Pasajes Sync
+
+Automatically syncs the `Cronograma` relation in Pasajes entries when the `departure` date property changes:
+
+| Departure Change | Action |
+|-----------------|--------|
+| Set to date | Links matching Cronograma entry |
+| Cleared | Removes all Cronograma relations |
+
 ## Project Structure
 
 ```

@@ -49,7 +49,8 @@ src/notion_hook/
 ├── workflows/             # Business logic
 │   ├── base.py            # Abstract workflow class
 │   ├── registry.py        # Workflow dispatch
-│   └── cronograma_sync.py # Cronograma sync implementation
+│   ├── cronograma_sync.py # Cronograma sync implementation
+│   └── pasajes_sync.py    # Pasajes sync implementation
 └── models/                # Data models
     └── webhook.py         # Pydantic models
 ```
@@ -87,6 +88,7 @@ Settings are loaded from environment variables using `pydantic-settings`:
 | `NOTION_API_TOKEN` | Notion integration token | Yes |
 | `CRONOGRAMA_DATABASE_ID` | Cronograma database ID | No (has default) |
 | `GASTOS_DATABASE_ID` | Gastos database ID | No (has default) |
+| `PASAJES_DATABASE_ID` | Pasajes database ID | No (has default) |
 | `HOST` | Server bind address | No (default: 0.0.0.0) |
 | `PORT` | Server port | No (default: 8000) |
 | `DEBUG` | Enable debug mode | No (default: false) |
@@ -112,7 +114,8 @@ Async HTTP client using `httpx` for Notion API operations:
 - `update_page(page_id, properties)` - Update page properties
 - `query_database(database_id, filter, sorts)` - Query with pagination
 - `find_cronograma_by_dates(dates)` - Find Cronograma entries by date
-- `update_gastos_cronograma_relation(page_id, cronograma_ids)` - Update relation
+- `update_gastos_cronograma_relation(page_id, cronograma_ids)` - Update Gastos relation
+- `update_pasajes_cronograma_relation(page_id, cronograma_ids)` - Update Pasajes relation
 
 ### Workflow System
 
@@ -149,7 +152,7 @@ result = await workflow.execute(context)
 
 #### Cronograma Sync (`workflows/cronograma_sync.py`)
 
-The main workflow that syncs Cronograma relations:
+The workflow that syncs Cronograma relations for Gastos entries:
 
 1. **Matches** when payload contains `Date` property
 2. **Execution logic**:
@@ -158,12 +161,28 @@ The main workflow that syncs Cronograma relations:
    - Date is range → Expand to all dates, find all matching entries
 3. **Updates** the Gastos page with found Cronograma page IDs
 
+#### Pasajes Sync (`workflows/pasajes_sync.py`)
+
+The workflow that syncs Cronograma relations for Pasajes entries:
+
+1. **Matches** when payload contains `departure` property
+2. **Execution logic**:
+   - Departure is null → Clear Cronograma relation
+   - Departure is set → Find matching Cronograma entry by date
+3. **Updates** the Pasajes page with found Cronograma page IDs
+
 ## Request Flow
 
-1. Notion automation triggers webhook on Date change
+1. Notion automation triggers webhook on Date/departure change
 2. Server validates `X-Calvo-Key` header
-3. Webhook endpoint parses payload and creates `WorkflowContext`
+3. Webhook endpoint parses Notion's nested payload structure:
+   - Page ID: `payload.data.id`
+   - Date property: `payload.data.properties.Date.date` (for Gastos)
+   - Departure property: `payload.data.properties.departure.date` (for Pasajes)
+   - Source metadata: `payload.source.event_id`, etc.
 4. Registry finds matching workflow via `matches()`
+   - CronogramaSyncWorkflow for `Date` property changes
+   - PasajesSyncWorkflow for `departure` property changes
 5. Workflow executes and updates Notion via API client
 6. Response returned to Notion
 

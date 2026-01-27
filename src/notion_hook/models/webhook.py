@@ -7,22 +7,48 @@ from pydantic import BaseModel, Field
 
 
 class DateValue(BaseModel):
-    """Notion date property value."""
+    """Notion date property value (the nested date field)."""
 
     start: date
     end: date | None = None
 
 
-class WebhookPayload(BaseModel):
+class NotionDateProperty(BaseModel):
+    """Notion Date property structure."""
+
+    id: str
+    type: str
+    date: DateValue | None = None
+
+
+class NotionAutomationSource(BaseModel):
+    """Source information from Notion automation."""
+
+    type: str
+    automation_id: str
+    action_id: str
+    event_id: str
+    attempt: int
+
+
+class NotionPageData(BaseModel):
+    """Page data object from Notion webhook."""
+
+    object: str
+    id: str
+    created_time: str
+    last_edited_time: str
+    properties: dict[str, Any]
+
+
+class NotionWebhookPayload(BaseModel):
     """Incoming webhook payload from Notion automation.
 
-    The Notion automation sends page ID and properties that changed.
+    Contains source metadata and page data with nested properties.
     """
 
-    id: str = Field(..., description="The Notion page ID")
-    date: DateValue | None = Field(None, alias="Date", description="The Date property")
-
-    model_config = {"populate_by_name": True}
+    source: NotionAutomationSource
+    data: NotionPageData
 
 
 class WebhookResponse(BaseModel):
@@ -40,5 +66,7 @@ class WorkflowContext(BaseModel):
     page_id: str
     payload: dict[str, Any]
     date_value: DateValue | None = None
+    departure_value: DateValue | None = None
+    workflow_name: str | None = None
 
     model_config = {"arbitrary_types_allowed": True}

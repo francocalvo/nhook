@@ -11,7 +11,9 @@ from notion_hook.api.routes import api_router
 from notion_hook.clients.notion import NotionClient
 from notion_hook.config import get_settings
 from notion_hook.core.logging import setup_logging
+from notion_hook.core.middleware import LoggingMiddleware
 from notion_hook.workflows.cronograma_sync import CronogramaSyncWorkflow
+from notion_hook.workflows.pasajes_sync import PasajesSyncWorkflow
 from notion_hook.workflows.registry import WorkflowRegistry
 
 if TYPE_CHECKING:
@@ -33,12 +35,14 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     settings = get_settings()
     logger = setup_logging(settings.debug)
     logger.info("Starting notion-hook server")
+    logger.debug("DEBUG mode enabled")
 
     _notion_client = NotionClient(settings)
     await _notion_client.__aenter__()
 
     _workflow_registry = WorkflowRegistry(_notion_client)
     _workflow_registry.register(CronogramaSyncWorkflow)
+    _workflow_registry.register(PasajesSyncWorkflow)
 
     logger.info(f"Registered {len(_workflow_registry.workflows)} workflows")
 
@@ -65,6 +69,7 @@ def create_app() -> FastAPI:
         lifespan=lifespan,
     )
 
+    app.add_middleware(LoggingMiddleware)
     app.include_router(api_router)
 
     return app

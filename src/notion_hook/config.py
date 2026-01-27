@@ -24,8 +24,9 @@ class Settings(BaseSettings):
 
     # Notion API
     notion_api_token: str
-    cronograma_database_id: str = "2f5f6e7f-0572-80e3-a411-000be22f385d"
-    gastos_database_id: str = "2e2f6e7f-0572-8010-9fb8-000b7db49de1"
+    cronograma_database_id: str
+    gastos_database_id: str
+    pasajes_database_id: str
 
     @property
     def notion_headers(self) -> dict[str, str]:
@@ -41,3 +42,8 @@ class Settings(BaseSettings):
 def get_settings() -> Settings:
     """Get cached settings instance."""
     return Settings()
+
+
+def clear_settings_cache() -> None:
+    """Clear the settings cache for testing."""
+    get_settings.cache_clear()

@@ -201,3 +201,25 @@ class NotionClient:
         num_relations = len(cronograma_page_ids)
         logger.info(f"Updating Gastos {page_id} with {num_relations} relations")
         return await self.update_page(page_id, properties)
+
+    async def update_pasajes_cronograma_relation(
+        self, page_id: str, cronograma_page_ids: list[str]
+    ) -> dict[str, Any]:
+        """Update the Cronograma relation on a Pasajes page.
+
+        Args:
+            page_id: The Pasajes page ID.
+            cronograma_page_ids: List of Cronograma page IDs to relate.
+
+        Returns:
+            The updated page data.
+        """
+        relation_value = [{"id": pid} for pid in cronograma_page_ids]
+
+        properties = {
+            "Cronograma": {"relation": relation_value},
+        }
+
+        num_relations = len(cronograma_page_ids)
+        logger.info(f"Updating Pasajes {page_id} with {num_relations} relations")
+        return await self.update_page(page_id, properties)

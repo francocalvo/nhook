@@ -40,7 +40,7 @@ class WorkflowRegistry:
         logger.info(f"Registered workflow: {workflow.name}")
 
     def get_workflow(self, context: WorkflowContext) -> BaseWorkflow:
-        """Find a workflow that matches the given context.
+        """Find a workflow that matches given context.
 
         Args:
             context: The webhook context to match against.
@@ -51,6 +51,15 @@ class WorkflowRegistry:
         Raises:
             WorkflowNotFoundError: If no workflow matches.
         """
+        if context.workflow_name:
+            for workflow in self._workflows:
+                if workflow.name == context.workflow_name:
+                    logger.debug(f"Matched workflow by name: {workflow.name}")
+                    return workflow
+            raise WorkflowNotFoundError(
+                f"No workflow found with name '{context.workflow_name}'"
+            )
+
         for workflow in self._workflows:
             if workflow.matches(context):
                 logger.debug(f"Matched workflow: {workflow.name}")

@@ -12,22 +12,26 @@ from notion_hook.workflows.cronograma_sync import CronogramaSyncWorkflow
 class TestCronogramaSyncWorkflow:
     """Tests for the CronogramaSyncWorkflow."""
 
-    def test_matches_with_date_property(self, mock_notion_client: AsyncMock) -> None:
-        """Test workflow matches when Date property is present."""
+    def test_matches_with_workflow_name(self, mock_notion_client: AsyncMock) -> None:
+        """Test workflow matches when workflow name is atracciones-cronograma."""
         workflow = CronogramaSyncWorkflow(mock_notion_client)
         context = WorkflowContext(
             page_id="test-id",
-            payload={"id": "test-id", "Date": {"start": "2026-03-14"}},
+            payload={"data": {"properties": {"Date": {"start": "2026-03-14"}}}},
             date_value=DateValue(start=date(2026, 3, 14)),
+            workflow_name="atracciones-cronograma",
         )
         assert workflow.matches(context) is True
 
-    def test_does_not_match_without_date(self, mock_notion_client: AsyncMock) -> None:
-        """Test workflow does not match when Date is not present."""
+    def test_does_not_match_with_wrong_name(
+        self, mock_notion_client: AsyncMock
+    ) -> None:
+        """Test workflow does not match when workflow name is different."""
         workflow = CronogramaSyncWorkflow(mock_notion_client)
         context = WorkflowContext(
             page_id="test-id",
-            payload={"id": "test-id", "OtherProperty": "value"},
+            payload={"data": {"properties": {"OtherProperty": "value"}}},
+            workflow_name="pasajes-cronograma",
         )
         assert workflow.matches(context) is False
 

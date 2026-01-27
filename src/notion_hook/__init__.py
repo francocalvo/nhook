@@ -1,3 +1,3 @@
-from notion_hook.app import app
+from notion_hook.app import app, main
 
-__all__ = ["app"]
+__all__ = ["app", "main"]

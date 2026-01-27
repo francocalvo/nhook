@@ -17,7 +17,9 @@ pkgs.mkShell {
     pkgs.git
     pkgs.ruff
     pkgs.pyright
-  ] ++ uvSet.dependencies;
+    pkgs.ngrok
+  ]
+  ++ uvSet.dependencies;
 
   shellHook = ''
     unset PYTHONPATH

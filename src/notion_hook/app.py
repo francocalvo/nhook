@@ -10,9 +10,11 @@ from fastapi import FastAPI
 from notion_hook.api.routes import api_router
 from notion_hook.clients.notion import NotionClient
 from notion_hook.config import get_settings
+from notion_hook.core.database import DatabaseClient
 from notion_hook.core.logging import setup_logging
 from notion_hook.core.middleware import LoggingMiddleware
 from notion_hook.workflows.cronograma_sync import CronogramaSyncWorkflow
+from notion_hook.workflows.gastos_sync import GastosSyncWorkflow
 from notion_hook.workflows.pasajes_sync import PasajesSyncWorkflow
 from notion_hook.workflows.registry import WorkflowRegistry
 
@@ -21,16 +23,17 @@ if TYPE_CHECKING:
 
 _workflow_registry: WorkflowRegistry | None = None
 _notion_client: NotionClient | None = None
+_database_client: DatabaseClient | None = None
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     """Application lifespan context manager.
 
-    Initializes the Notion client and workflow registry on startup,
+    Initializes Notion client, database client, and workflow registry on startup,
     and cleans up on shutdown.
     """
-    global _workflow_registry, _notion_client
+    global _workflow_registry, _notion_client, _database_client
 
     settings = get_settings()
     logger = setup_logging(settings.debug)
@@ -40,9 +43,13 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     _notion_client = NotionClient(settings)
     await _notion_client.__aenter__()
 
-    _workflow_registry = WorkflowRegistry(_notion_client)
+    _database_client = DatabaseClient(settings)
+    await _database_client.initialize()
+
+    _workflow_registry = WorkflowRegistry(_notion_client, _database_client)
     _workflow_registry.register(CronogramaSyncWorkflow)
     _workflow_registry.register(PasajesSyncWorkflow)
+    _workflow_registry.register(GastosSyncWorkflow)
 
     logger.info(f"Registered {len(_workflow_registry.workflows)} workflows")
 
@@ -51,6 +58,10 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     if _notion_client:
         await _notion_client.__aexit__(None, None, None)
         _notion_client = None
+
+    if _database_client:
+        await _database_client.close()
+        _database_client = None
 
     _workflow_registry = None
     logger.info("Shutdown complete")

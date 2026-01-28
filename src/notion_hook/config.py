@@ -28,6 +28,13 @@ class Settings(BaseSettings):
     gastos_database_id: str
     pasajes_database_id: str
 
+    # Database
+    database_path: str = "notion_hook.db"
+
+    # Retry configuration
+    max_retries: int = 3
+    retry_delay: float = 1.0
+
     @property
     def notion_headers(self) -> dict[str, str]:
         """Return headers for Notion API requests."""

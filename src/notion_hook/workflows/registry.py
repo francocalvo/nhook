@@ -7,6 +7,7 @@ from notion_hook.core.logging import get_logger
 
 if TYPE_CHECKING:
     from notion_hook.clients.notion import NotionClient
+    from notion_hook.core.database import DatabaseClient
     from notion_hook.models.webhook import WorkflowContext
     from notion_hook.workflows.base import BaseWorkflow
 
@@ -17,16 +18,22 @@ class WorkflowRegistry:
     """Registry for workflow discovery and dispatch.
 
     Manages registered workflows and matches incoming webhooks
-    to the appropriate workflow for execution.
+    to appropriate workflow for execution.
     """
 
-    def __init__(self, notion_client: NotionClient) -> None:
-        """Initialize the registry with a Notion client.
+    def __init__(
+        self,
+        notion_client: NotionClient,
+        database_client: DatabaseClient | None = None,
+    ) -> None:
+        """Initialize registry with clients.
 
         Args:
             notion_client: The Notion API client for workflows to use.
+            database_client: Optional database client for workflows to use.
         """
         self.notion_client = notion_client
+        self.database_client = database_client
         self._workflows: list[BaseWorkflow] = []
 
     def register(self, workflow_class: type[BaseWorkflow]) -> None:
@@ -35,7 +42,10 @@ class WorkflowRegistry:
         Args:
             workflow_class: The workflow class to register.
         """
-        workflow = workflow_class(self.notion_client)
+        try:
+            workflow = workflow_class(self.notion_client, self.database_client)
+        except TypeError:
+            workflow = workflow_class(self.notion_client)
         self._workflows.append(workflow)
         logger.info(f"Registered workflow: {workflow.name}")
 

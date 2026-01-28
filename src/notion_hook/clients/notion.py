@@ -235,6 +235,28 @@ class NotionClient:
         logger.info(f"Updating Pasajes {page_id} with {num_relations} relations")
         return await self.update_page(page_id, properties)
 
+    async def update_atracciones_cronograma_relation(
+        self, page_id: str, cronograma_page_ids: list[str]
+    ) -> dict[str, Any]:
+        """Update the Cronograma relation on an Atracciones page.
+
+        Args:
+            page_id: The Atracciones page ID.
+            cronograma_page_ids: List of Cronograma page IDs to relate.
+
+        Returns:
+            The updated page data.
+        """
+        relation_value = [{"id": pid} for pid in cronograma_page_ids]
+
+        properties = {
+            PropertyNames.CRONOGRAMA: {"relation": relation_value},
+        }
+
+        num_relations = len(cronograma_page_ids)
+        logger.info(f"Updating Atracciones {page_id} with {num_relations} relations")
+        return await self.update_page(page_id, properties)
+
     async def query_all_gastos(self, page_size: int = 100) -> list[dict[str, Any]]:
         """Query all Gastos from the Gastos database with pagination.
 

@@ -21,7 +21,7 @@ from notion_hook.config import Settings, clear_settings_cache
 
 
 @pytest.fixture(autouse=True)
-def clear_cache():
+def clear_cache() -> Generator[None, None, None]:
     """Clear settings cache before each test."""
     clear_settings_cache()
     yield
@@ -67,6 +67,7 @@ def test_client() -> Generator[TestClient, None, None]:
         cronograma_database_id="test-cronograma-db-id",
         gastos_database_id="test-gastos-db-id",
         pasajes_database_id="test-pasajes-db-id",
+        database_path=":memory:",
         debug=True,
     )
 

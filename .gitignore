@@ -12,6 +12,11 @@ wheels/
 # Secrets
 .env
 
+# Local databases
+*.db
+*.sqlite
+*.sqlite3
+
 # Nix things
 result
 .direnv

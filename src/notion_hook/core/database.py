@@ -1,19 +1,23 @@
 from __future__ import annotations
 
 import asyncio
-from typing import Any
+from collections.abc import Awaitable, Callable
+from typing import ParamSpec, TypeVar
 
 import aiosqlite
 
 from notion_hook.config import Settings
-from notion_hook.core.exceptions import NotionClientError
+from notion_hook.core.exceptions import NotionHookError
 from notion_hook.core.logging import get_logger
 from notion_hook.models.gastos import FailLogEntry, Gasto
 
 logger = get_logger("core.database")
 
+P = ParamSpec("P")
+T = TypeVar("T")
 
-class DatabaseError(NotionClientError):
+
+class DatabaseError(NotionHookError):
     """Database operation error."""
 
 
@@ -113,29 +117,33 @@ class DatabaseClient:
         Raises:
             DatabaseError: If the operation fails.
         """
-        async with self.conn.execute(
-            "SELECT * FROM gastos WHERE page_id = ?", (page_id,)
-        ) as cursor:
-            row = await cursor.fetchone()
-            if row:
-                return Gasto(
-                    page_id=row[0],
-                    payment_method=row[1],
-                    description=row[2],
-                    amount=row[3],
-                    date=row[4],
-                    created_at=row[5],
-                    updated_at=row[6],
-                )
-        return None
+
+        async def _get() -> Gasto | None:
+            async with self.conn.execute(
+                "SELECT * FROM gastos WHERE page_id = ?", (page_id,)
+            ) as cursor:
+                row = await cursor.fetchone()
+                if row:
+                    return Gasto(
+                        page_id=row[0],
+                        payment_method=row[1],
+                        description=row[2],
+                        amount=row[3],
+                        date=row[4],
+                        created_at=row[5],
+                        updated_at=row[6],
+                    )
+            return None
+
+        return await self._retry_operation("get", _get)
 
     async def _retry_operation(
         self,
         operation: str,
-        func,
-        *args: object,
-        **kwargs: object,
-    ) -> Any:
+        func: Callable[P, Awaitable[T]],
+        *args: P.args,
+        **kwargs: P.kwargs,
+    ) -> T:
         """Execute operation with retry logic.
 
         Args:
@@ -151,27 +159,28 @@ class DatabaseClient:
             DatabaseError: If all retries fail.
         """
         last_error: Exception | None = None
-        for attempt in range(self.settings.max_retries):
+        max_retries = max(1, self.settings.max_retries)
+        for attempt in range(max_retries):
             try:
                 return await func(*args, **kwargs)
-            except (aiosqlite.Error, Exception) as e:
+            except Exception as e:
                 last_error = e
-                if attempt < self.settings.max_retries - 1:
+                if attempt < max_retries - 1:
                     delay = self.settings.retry_delay * (2**attempt)
                     msg = (
                         f"Database {operation} failed "
-                        f"(attempt {attempt + 1}/{self.settings.max_retries}), "
+                        f"(attempt {attempt + 1}/{max_retries}), "
                         f"retrying in {delay}s: {e}"
                     )
                     logger.warning(msg)
                     await asyncio.sleep(delay)
                 else:
                     msg = (
-                        f"Database {operation} failed after "
-                        f"{self.settings.max_retries} attempts: {e}"
+                        f"Database {operation} failed after {max_retries} attempts: {e}"
                     )
                     logger.error(msg)
-        raise DatabaseError(f"Database {operation} failed") from last_error
+        details = f": {last_error}" if last_error else ""
+        raise DatabaseError(f"Database {operation} failed{details}") from last_error
 
     async def create_gasto(self, gasto: Gasto) -> None:
         """Insert a new gasto.
@@ -184,13 +193,19 @@ class DatabaseClient:
         """
 
         async def _insert() -> None:
-            columns = (
-                "page_id, payment_method, description, amount, date, "
-                "created_at, updated_at"
-            )
             await self.conn.execute(
-                f"""INSERT INTO gastos ({columns})
-                VALUES (?, ?, ?, ?, ?, ?, ?)""",
+                """
+                INSERT INTO gastos (
+                    page_id,
+                    payment_method,
+                    description,
+                    amount,
+                    date,
+                    created_at,
+                    updated_at
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+                """,
                 (
                     gasto.page_id,
                     gasto.payment_method,

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+from collections.abc import Generator
 from unittest.mock import AsyncMock
 
 import pytest
@@ -20,7 +21,7 @@ from tests.conftest import make_notion_webhook_payload
 
 
 @pytest.fixture(autouse=True)
-def clear_cache():
+def clear_cache() -> Generator[None, None, None]:
     """Clear settings cache before each test."""
     clear_settings_cache()
     yield

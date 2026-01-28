@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import inspect
 from typing import TYPE_CHECKING
 
 from notion_hook.core.exceptions import WorkflowNotFoundError
@@ -42,9 +43,31 @@ class WorkflowRegistry:
         Args:
             workflow_class: The workflow class to register.
         """
-        try:
+        init_signature = inspect.signature(workflow_class.__init__)
+        params = list(init_signature.parameters.values())
+        non_self_params = [p for p in params if p.name != "self"]
+
+        positional_count = sum(
+            1
+            for p in non_self_params
+            if p.kind
+            in (
+                inspect.Parameter.POSITIONAL_ONLY,
+                inspect.Parameter.POSITIONAL_OR_KEYWORD,
+            )
+        )
+        accepts_varargs = any(
+            p.kind == inspect.Parameter.VAR_POSITIONAL for p in non_self_params
+        )
+        accepts_db = (
+            "database_client" in init_signature.parameters
+            or accepts_varargs
+            or positional_count >= 2
+        )
+
+        if accepts_db:
             workflow = workflow_class(self.notion_client, self.database_client)
-        except TypeError:
+        else:
             workflow = workflow_class(self.notion_client)
         self._workflows.append(workflow)
         logger.info(f"Registered workflow: {workflow.name}")

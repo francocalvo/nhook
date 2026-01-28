@@ -4,6 +4,7 @@ from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
 
 from notion_hook.core.database import DatabaseClient, DatabaseError
+from notion_hook.core.exceptions import WorkflowError
 from notion_hook.core.logging import get_logger
 from notion_hook.models.gastos import Gasto
 from notion_hook.workflows.base import BaseWorkflow
@@ -75,14 +76,25 @@ class GastosSyncWorkflow(BaseWorkflow):
             return result
 
         except DatabaseError as e:
-            await self.database_client.log_failure(
-                page_id=page_id,
-                operation=operation,
-                error_message=str(e),
-                retry_count=self.database_client.settings.max_retries,
-            )
+            try:
+                await self.database_client.log_failure(
+                    page_id=page_id,
+                    operation=operation,
+                    error_message=str(e),
+                    retry_count=self.database_client.settings.max_retries,
+                )
+            except DatabaseError as log_error:
+                logger.warning(
+                    f"Failed to write fail_log entry for page {page_id}: {log_error}"
+                )
             logger.error(f"Database error for {operation} on page {page_id}: {e}")
             raise
+        except Exception as e:
+            logger.error(
+                f"Gastos sync failed for page {page_id}: {e}",
+                exc_info=True,
+            )
+            raise WorkflowError(f"Gastos sync failed: {e}") from e
 
     async def _detect_operation(self, page_id: str, payload: dict[str, Any]) -> str:
         """Detect operation type from payload.
@@ -96,6 +108,9 @@ class GastosSyncWorkflow(BaseWorkflow):
         """
         data = payload.get("data", {})
         properties = data.get("properties", {})
+
+        if data.get("archived") is True or data.get("in_trash") is True:
+            return "delete"
 
         if not properties:
             return "delete"

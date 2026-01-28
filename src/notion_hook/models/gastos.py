@@ -5,6 +5,8 @@ from typing import Any
 
 from pydantic import BaseModel, Field
 
+from notion_hook.core.utils import get_property_ci
+
 
 class Gasto(BaseModel):
     """Represents a gastos database record."""
@@ -36,26 +38,77 @@ class Gasto(BaseModel):
         Returns:
             Gasto instance.
         """
+
+        def _first_property(*names: str) -> dict[str, Any] | None:
+            for name in names:
+                value = get_property_ci(properties, name)
+                if isinstance(value, dict):
+                    return value
+            return None
+
+        def _extract_select_name(prop: dict[str, Any]) -> str | None:
+            select = prop.get("select") or {}
+            if isinstance(select, dict) and isinstance(select.get("name"), str):
+                return select["name"]
+
+            multi = prop.get("multi_select") or []
+            if isinstance(multi, list):
+                names_out: list[str] = []
+                for item in multi:
+                    if isinstance(item, dict) and isinstance(item.get("name"), str):
+                        names_out.append(item["name"])
+                return ", ".join(names_out) if names_out else None
+
+            return None
+
+        def _extract_text(prop: dict[str, Any]) -> str | None:
+            parts: list[str] = []
+            for key in ("title", "rich_text"):
+                items = prop.get(key) or []
+                if not isinstance(items, list):
+                    continue
+                for item in items:
+                    if not isinstance(item, dict):
+                        continue
+                    if isinstance(item.get("plain_text"), str):
+                        parts.append(item["plain_text"])
+                        continue
+                    text = item.get("text") or {}
+                    if isinstance(text, dict) and isinstance(text.get("content"), str):
+                        parts.append(text["content"])
+                if parts:
+                    break
+            return "".join(parts) if parts else None
+
+        def _extract_number(prop: dict[str, Any]) -> float | None:
+            number = prop.get("number")
+            if isinstance(number, bool):
+                return None
+            if isinstance(number, (int, float)):
+                return float(number)
+            return None
+
+        def _extract_date_start(prop: dict[str, Any]) -> str | None:
+            date_obj = prop.get("date")
+            if isinstance(date_obj, dict) and isinstance(date_obj.get("start"), str):
+                return date_obj["start"]
+            return None
+
         payment_method = None
-        if pm_data := properties.get("payment_method") or properties.get(
-            "Payment Method"
-        ):
-            payment_method = pm_data.get("select", {}).get("name")
+        if pm_prop := _first_property("Payment Method", "payment_method"):
+            payment_method = _extract_select_name(pm_prop)
 
         description = None
-        if desc_data := properties.get("description") or properties.get("Description"):
-            description = (
-                desc_data.get("title", [{"text": {}}])[0].get("text", {}).get("content")
-            )
+        if desc_prop := _first_property("Description", "description"):
+            description = _extract_text(desc_prop)
 
         amount = None
-        if amount_data := properties.get("amount") or properties.get("Amount"):
-            amount = amount_data.get("number")
+        if amount_prop := _first_property("Amount", "amount"):
+            amount = _extract_number(amount_prop)
 
         date = None
-        if date_data := properties.get("date") or properties.get("Date"):
-            if date_obj := date_data.get("date"):
-                date = date_obj.get("start")
+        if date_prop := _first_property("Date", "date"):
+            date = _extract_date_start(date_prop)
 
         return cls(
             page_id=page_id,

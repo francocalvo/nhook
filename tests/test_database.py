@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 import tempfile
+from collections.abc import Generator
 
 import pytest
 
@@ -17,18 +18,18 @@ from notion_hook.models.gastos import Gasto
 
 
 @pytest.fixture(autouse=True)
-def clear_cache():
+def clear_cache() -> Generator[None, None, None]:
     """Clear settings cache before each test."""
     clear_settings_cache()
     yield
 
 
 @pytest.fixture
-def settings() -> Settings:
+def settings() -> Generator[Settings, None, None]:
     """Return test settings with temporary database path."""
     with tempfile.NamedTemporaryFile(suffix=".db", delete=False) as f:
         db_path = f.name
-    return Settings(
+    yield Settings(
         webhook_secret_key="test-secret-key",
         notion_api_token="secret_test_token",
         cronograma_database_id="test-cronograma-db-id",
@@ -39,6 +40,7 @@ def settings() -> Settings:
         max_retries=2,
         retry_delay=0.01,
     )
+    os.unlink(db_path)
 
 
 @pytest.fixture

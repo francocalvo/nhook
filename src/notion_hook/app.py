@@ -40,30 +40,41 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     logger.info("Starting notion-hook server")
     logger.debug("DEBUG mode enabled")
 
-    _notion_client = NotionClient(settings)
-    await _notion_client.__aenter__()
+    created_notion_client = False
+    created_database_client = False
+    created_registry = False
 
-    _database_client = DatabaseClient(settings)
-    await _database_client.initialize()
+    if _notion_client is None:
+        _notion_client = NotionClient(settings)
+        await _notion_client.__aenter__()
+        created_notion_client = True
 
-    _workflow_registry = WorkflowRegistry(_notion_client, _database_client)
-    _workflow_registry.register(CronogramaSyncWorkflow)
-    _workflow_registry.register(PasajesSyncWorkflow)
-    _workflow_registry.register(GastosSyncWorkflow)
+    if _database_client is None:
+        _database_client = DatabaseClient(settings)
+        await _database_client.initialize()
+        created_database_client = True
+
+    if _workflow_registry is None:
+        _workflow_registry = WorkflowRegistry(_notion_client, _database_client)
+        _workflow_registry.register(CronogramaSyncWorkflow)
+        _workflow_registry.register(PasajesSyncWorkflow)
+        _workflow_registry.register(GastosSyncWorkflow)
+        created_registry = True
 
     logger.info(f"Registered {len(_workflow_registry.workflows)} workflows")
 
     yield
 
-    if _notion_client:
+    if created_notion_client and _notion_client:
         await _notion_client.__aexit__(None, None, None)
         _notion_client = None
 
-    if _database_client:
+    if created_database_client and _database_client:
         await _database_client.close()
         _database_client = None
 
-    _workflow_registry = None
+    if created_registry:
+        _workflow_registry = None
     logger.info("Shutdown complete")
 
 

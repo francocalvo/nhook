@@ -5,6 +5,7 @@ from typing import Annotated, Any
 from fastapi import APIRouter, Depends, Header, HTTPException, Request, status
 
 from notion_hook.core.auth import verify_webhook_key
+from notion_hook.core.database import DatabaseError
 from notion_hook.core.exceptions import (
     NotionClientError,
     WorkflowError,
@@ -128,6 +129,13 @@ async def handle_notion_webhook(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Workflow error: {e}",
+        ) from e
+
+    except DatabaseError as e:
+        logger.error(f"Database error: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=f"Database error: {e}",
         ) from e
 
     except NotionClientError as e:

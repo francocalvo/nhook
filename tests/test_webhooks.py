@@ -2,7 +2,10 @@ from __future__ import annotations
 
 from fastapi.testclient import TestClient
 
-from tests.conftest import make_notion_webhook_payload
+from tests.conftest import (
+    make_atracciones_webhook_payload,
+    make_notion_webhook_payload,
+)
 
 
 def test_webhook_requires_page_id(
@@ -182,6 +185,89 @@ def test_webhook_case_insensitive_departure_uppercase(
             }
         }
     )
+    response = test_client.post("/webhooks/notion", json=payload, headers=headers)
+    assert response.status_code == 200
+    data = response.json()
+    assert data["success"] is True
+
+
+def test_webhook_atracciones_datetime_parsing(
+    test_client: TestClient, auth_headers: dict[str, str]
+) -> None:
+    """Test webhook correctly parses datetime strings for atracciones workflow."""
+    headers = auth_headers.copy()
+    headers["X-Calvo-Workflow"] = "atracciones-cronograma"
+    payload = make_atracciones_webhook_payload(fecha_start="2026-03-14T10:30:00.000Z")
+    response = test_client.post("/webhooks/notion", json=payload, headers=headers)
+    assert response.status_code == 200
+    data = response.json()
+    assert data["success"] is True
+    assert data["page_id"] == "test-page-id"
+
+
+def test_webhook_atracciones_date_parsing(
+    test_client: TestClient, auth_headers: dict[str, str]
+) -> None:
+    """Test webhook correctly parses date-only strings for atracciones workflow."""
+    headers = auth_headers.copy()
+    headers["X-Calvo-Workflow"] = "atracciones-cronograma"
+    payload = make_atracciones_webhook_payload(fecha_start="2026-03-14")
+    response = test_client.post("/webhooks/notion", json=payload, headers=headers)
+    assert response.status_code == 200
+    data = response.json()
+    assert data["success"] is True
+    assert data["page_id"] == "test-page-id"
+
+
+def test_webhook_atracciones_empty_fecha(
+    test_client: TestClient, auth_headers: dict[str, str]
+) -> None:
+    """Test webhook clears relations when Fecha is empty for atracciones."""
+    headers = auth_headers.copy()
+    headers["X-Calvo-Workflow"] = "atracciones-cronograma"
+    payload = make_atracciones_webhook_payload(fecha_start=None)
+    response = test_client.post("/webhooks/notion", json=payload, headers=headers)
+    assert response.status_code == 200
+    data = response.json()
+    assert data["success"] is True
+    assert data["page_id"] == "test-page-id"
+    assert data["updated_relations"] == []
+
+
+def test_webhook_atracciones_case_insensitive_lowercase(
+    test_client: TestClient, auth_headers: dict[str, str]
+) -> None:
+    """Test webhook handles lowercase 'fecha' property."""
+    headers = auth_headers.copy()
+    headers["X-Calvo-Workflow"] = "atracciones-cronograma"
+    payload = make_atracciones_webhook_payload(fecha_start="2026-03-14T15:45:00Z")
+    payload["data"]["properties"] = {
+        "fecha": {
+            "id": "fecha-property-id",
+            "type": "date",
+            "date": {"start": "2026-03-14T15:45:00Z", "end": None, "time_zone": None},
+        }
+    }
+    response = test_client.post("/webhooks/notion", json=payload, headers=headers)
+    assert response.status_code == 200
+    data = response.json()
+    assert data["success"] is True
+
+
+def test_webhook_atracciones_case_insensitive_uppercase(
+    test_client: TestClient, auth_headers: dict[str, str]
+) -> None:
+    """Test webhook handles uppercase 'FECHA' property."""
+    headers = auth_headers.copy()
+    headers["X-Calvo-Workflow"] = "atracciones-cronograma"
+    payload = make_atracciones_webhook_payload(fecha_start="2026-03-14T15:45:00Z")
+    payload["data"]["properties"] = {
+        "FECHA": {
+            "id": "fecha-property-id",
+            "type": "date",
+            "date": {"start": "2026-03-14T15:45:00Z", "end": None, "time_zone": None},
+        }
+    }
     response = test_client.post("/webhooks/notion", json=payload, headers=headers)
     assert response.status_code == 200
     data = response.json()

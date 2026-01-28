@@ -79,11 +79,13 @@ def test_client() -> Generator[TestClient, None, None]:
     mock_client.update_pasajes_cronograma_relation = AsyncMock(return_value={})
     mock_client.update_atracciones_cronograma_relation = AsyncMock(return_value={})
 
+    from notion_hook.workflows.atracciones_sync import AtraccionesSyncWorkflow
     from notion_hook.workflows.pasajes_sync import PasajesSyncWorkflow
 
     registry = WorkflowRegistry(mock_client)
     registry.register(CronogramaSyncWorkflow)
     registry.register(PasajesSyncWorkflow)
+    registry.register(AtraccionesSyncWorkflow)
 
     with respx.mock(assert_all_called=False) as respx_mock:
         respx_mock.post(

@@ -46,7 +46,18 @@ uv run pytest --cov=src          # With coverage
 
 # Development Conventions
 
-For commiting, use the default '/commit' Command.
+For commiting, use the default '/commit' Command, or indications in
+.claude/commands/commit.md
+
+Create a commit using commitizen after each feature. Each commit should be
+granular:
+
+- added feature.
+- fixed tests.
+- formatted files.
+- created tests.
+
+You get the gist.
 
 ## Branch Naming
 

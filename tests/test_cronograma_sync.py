@@ -13,13 +13,13 @@ class TestCronogramaSyncWorkflow:
     """Tests for the CronogramaSyncWorkflow."""
 
     def test_matches_with_workflow_name(self, mock_notion_client: AsyncMock) -> None:
-        """Test workflow matches when workflow name is atracciones-cronograma."""
+        """Test workflow matches when workflow name is gastos-cronograma."""
         workflow = CronogramaSyncWorkflow(mock_notion_client)
         context = WorkflowContext(
             page_id="test-id",
             payload={"data": {"properties": {"Date": {"start": "2026-03-14"}}}},
             date_value=DateValue(start=date(2026, 3, 14)),
-            workflow_name="atracciones-cronograma",
+            workflow_name="gastos-cronograma",
         )
         assert workflow.matches(context) is True
 

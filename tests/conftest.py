@@ -76,8 +76,11 @@ def test_client() -> Generator[TestClient, None, None]:
     mock_client.update_gastos_cronograma_relation = AsyncMock(return_value={})
     mock_client.update_pasajes_cronograma_relation = AsyncMock(return_value={})
 
+    from notion_hook.workflows.pasajes_sync import PasajesSyncWorkflow
+
     registry = WorkflowRegistry(mock_client)
     registry.register(CronogramaSyncWorkflow)
+    registry.register(PasajesSyncWorkflow)
 
     with respx.mock(assert_all_called=False) as respx_mock:
         respx_mock.post(
@@ -103,7 +106,7 @@ def auth_headers() -> dict[str, str]:
     """Return valid auth headers."""
     return {
         "X-Calvo-Key": "test-secret-key",
-        "X-Calvo-Workflow": "atracciones-cronograma",
+        "X-Calvo-Workflow": "gastos-cronograma",
     }
 
 

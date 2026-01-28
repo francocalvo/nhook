@@ -24,6 +24,7 @@ class CronogramaSyncWorkflow(BaseWorkflow):
 
     name = "gastos-cronograma"
     description = "Sync Cronograma relation based on Date changes"
+    date_property_name = "Date"  # NEW
 
     def matches(self, context: WorkflowContext) -> bool:
         """Match if the workflow name matches this workflow.

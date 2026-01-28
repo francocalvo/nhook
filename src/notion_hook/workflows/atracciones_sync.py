@@ -25,6 +25,7 @@ class AtraccionesSyncWorkflow(BaseWorkflow):
 
     name = "atracciones-cronograma"
     description = "Sync Cronograma relation based on Fecha changes"
+    date_property_name = "Fecha"
 
     def matches(self, context: WorkflowContext) -> bool:
         """Match if the workflow name matches this workflow.
@@ -41,7 +42,7 @@ class AtraccionesSyncWorkflow(BaseWorkflow):
         """Execute the Atracciones sync workflow.
 
         Args:
-            context: The webhook context with page ID and fecha value.
+            context: The webhook context with page ID and date value.
 
         Returns:
             Dictionary with updated_relations list.
@@ -50,7 +51,8 @@ class AtraccionesSyncWorkflow(BaseWorkflow):
             WorkflowError: If sync fails.
         """
         page_id = context.page_id
-        fecha_value = context.fecha_value
+        # Alias for domain-specific clarity
+        fecha_value = context.date_value
 
         logger.info(f"Executing Atracciones sync for page {page_id}")
 

@@ -81,12 +81,25 @@ def test_webhook_with_pasajes_workflow(
     assert data["success"] is True
 
 
-def test_webhook_without_workflow_header_no_match(
+def test_webhook_requires_workflow_header(
     test_client: TestClient, auth_headers: dict[str, str]
 ) -> None:
-    """Test webhook without workflow header returns no workflow."""
+    """Test webhook requires X-Calvo-Workflow header."""
     headers = auth_headers.copy()
     del headers["X-Calvo-Workflow"]
+    payload = make_notion_webhook_payload()
+    response = test_client.post("/webhooks/notion", json=payload, headers=headers)
+    assert response.status_code == 400
+    data = response.json()
+    assert "Missing required 'X-Calvo-Workflow' header" in data["detail"]
+
+
+def test_webhook_unknown_workflow_name(
+    test_client: TestClient, auth_headers: dict[str, str]
+) -> None:
+    """Test webhook with unknown workflow name returns error."""
+    headers = auth_headers.copy()
+    headers["X-Calvo-Workflow"] = "unknown-workflow"
     payload = make_notion_webhook_payload()
     response = test_client.post("/webhooks/notion", json=payload, headers=headers)
     assert response.status_code == 200

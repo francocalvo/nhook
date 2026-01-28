@@ -67,6 +67,7 @@ class WorkflowContext(BaseModel):
     payload: dict[str, Any]
     date_value: DateValue | None = None
     departure_value: DateValue | None = None
+    fecha_value: DateValue | None = None
     workflow_name: str | None = None
 
     model_config = {"arbitrary_types_allowed": True}

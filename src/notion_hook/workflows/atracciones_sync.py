@@ -18,6 +18,9 @@ class AtraccionesSyncWorkflow(BaseWorkflow):
     When an Atracciones entry's Fecha property changes:
     - If Fecha is empty: clear the Cronograma relation
     - If Fecha is set: find matching Cronograma entry by date
+
+    Note: Datetime values are normalized to date at parse time,
+    so only the date portion is used for matching.
     """
 
     name = "atracciones-cronograma"
@@ -73,6 +76,15 @@ class AtraccionesSyncWorkflow(BaseWorkflow):
             logger.debug(f"Raw Cronograma entries: {cronograma_entries}")
 
             cronograma_ids = [entry["id"] for entry in cronograma_entries]
+
+            if not cronograma_ids:
+                logger.info(f"No Cronograma entries found for {page_id}")
+                # Clear relation to ensure consistency
+                await self.notion_client.update_atracciones_cronograma_relation(
+                    page_id, []
+                )
+                return {"updated_relations": []}
+
             logger.info(
                 f"Found {len(cronograma_ids)} Cronograma entries to link: "
                 f"{cronograma_ids}"

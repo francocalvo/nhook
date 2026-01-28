@@ -21,3 +21,6 @@ wheels/
 result
 .direnv
 .envrc
+
+# LLM build notes
+llm/

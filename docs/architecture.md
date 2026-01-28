@@ -33,7 +33,7 @@ NHook is a FastAPI-based webhook server that receives events from Notion automat
 ## Directory Structure
 
 ```
-src/notion_hook/
+ src/notion_hook/
 ├── app.py                 # Application factory and entry point
 ├── config.py              # Environment-based settings
 ├── api/                   # HTTP layer
@@ -51,9 +51,10 @@ src/notion_hook/
 ├── workflows/             # Business logic
 │   ├── base.py            # Abstract workflow class
 │   ├── registry.py        # Workflow dispatch
-│   ├── cronograma_sync.py # Cronograma sync implementation
-│   ├── pasajes_sync.py    # Pasajes sync implementation
-│   └── gastos_sync.py    # Gastos sync implementation
+ │   ├── cronograma_sync.py # Cronograma sync implementation
+ │   ├── pasajes_sync.py    # Pasajes sync implementation
+ │   ├── atracciones_sync.py # Atracciones sync implementation
+ │   └── gastos_sync.py     # Gastos sync implementation
 ├── services/              # Business services
 │   └── gastos_reload.py   # Gastos reload service
 └── models/                # Data models
@@ -92,9 +93,9 @@ Settings are loaded from environment variables using `pydantic-settings`:
 |----------|-------------|----------|
 | `WEBHOOK_SECRET_KEY` | Secret for X-Calvo-Key validation | Yes |
 | `NOTION_API_TOKEN` | Notion integration token | Yes |
-| `CRONOGRAMA_DATABASE_ID` | Cronograma database ID | No (has default) |
-| `GASTOS_DATABASE_ID` | Gastos database ID | No (has default) |
-| `PASAJES_DATABASE_ID` | Pasajes database ID | No (has default) |
+| `CRONOGRAMA_DATABASE_ID` | Cronograma database ID | Yes |
+| `GASTOS_DATABASE_ID` | Gastos database ID | Yes |
+| `PASAJES_DATABASE_ID` | Pasajes database ID | Yes |
 | `HOST` | Server bind address | No (default: 0.0.0.0) |
 | `PORT` | Server port | No (default: 8000) |
 | `DEBUG` | Enable debug mode | No (default: false) |
@@ -216,16 +217,16 @@ See **[Gastos Feature](./gastos.md)** for complete documentation.
 
 ## Request Flow
 
-1. Notion automation triggers webhook on Date/departure change
+1. Notion automation triggers webhook on a property change
 2. Server validates `X-Calvo-Key` header
 3. Webhook endpoint parses Notion's nested payload structure:
    - Page ID: `payload.data.id`
-   - Date property: `payload.data.properties.Date.date` (for Gastos)
-   - Departure property: `payload.data.properties.departure.date` (for Pasajes)
-   - Source metadata: `payload.source.event_id`, etc.
+    - Date property: `payload.data.properties.Date.date` (for Gastos Cronograma)
+    - Departure property: `payload.data.properties.Departure.date` (for Pasajes Cronograma)
+    - Fecha property: `payload.data.properties.Fecha.date` (for Atracciones Cronograma)
+    - Source metadata: `payload.source.event_id`, etc.
 4. Registry finds matching workflow via `matches()`
-   - CronogramaSyncWorkflow for `Date` property changes
-   - PasajesSyncWorkflow for `departure` property changes
+    - Or runs the workflow indicated by `X-Calvo-Workflow` when present
 5. Workflow executes and updates Notion via API client
 6. Response returned to Notion
 

@@ -1,6 +1,6 @@
 # NHook Documentation
 
-NHook is a FastAPI webhook server that auto-syncs Notion database relations based on property changes.
+NHook is a FastAPI webhook server that receives Notion automation webhooks and runs workflows to keep Notion relations in sync and/or mirror data to a local SQLite database.
 
 ## Quick Start
 
@@ -19,13 +19,62 @@ uv run nhook
 curl http://localhost:8000/health
 ```
 
+## Configuration
+
+NHook is configured entirely via environment variables (see `.env.example`).
+
+Required:
+
+- `WEBHOOK_SECRET_KEY`: shared secret for `X-Calvo-Key` request header validation
+- `NOTION_API_TOKEN`: Notion integration token
+- `CRONOGRAMA_DATABASE_ID`: Notion database ID used by Cronograma relation workflows
+- `GASTOS_DATABASE_ID`: Notion database ID used by Gastos reload service
+- `PASAJES_DATABASE_ID`: Notion database ID used by Pasajes workflow (for Notion queries/updates)
+
+Optional:
+
+- `HOST` (default: `0.0.0.0`)
+- `PORT` (default: `8000`)
+- `DEBUG` (default: `false`)
+- `DATABASE_PATH` (default: `notion_hook.db`)
+- `MAX_RETRIES` (default: `3`) and `RETRY_DELAY` (default: `1.0`) for SQLite operations
+
+## HTTP API
+
+Endpoints:
+
+- `GET /health` — health check
+- `POST /webhooks/notion` — Notion automation webhook receiver
+- `POST /api/gastos/reload` — start a Gastos reload job
+- `GET /api/gastos/reload/{job_id}` — job status
+
+Auth:
+
+- `X-Calvo-Key: <WEBHOOK_SECRET_KEY>` is required on all endpoints.
+- `X-Calvo-Workflow: <workflow-name>` is optional but recommended for deterministically selecting a workflow.
+
+## Workflows
+
+Workflows are selected in this order:
+
+1. If `X-Calvo-Workflow` is present, NHook runs the workflow with that exact name.
+2. Otherwise it tries to find the first registered workflow whose `matches()` returns `True`.
+
+Current workflow names:
+
+- `gastos-cronograma` — sync Cronograma relation for Gastos when `Date` changes
+- `pasajes-cronograma` — sync Cronograma relation for Pasajes when `Departure` changes (case-insensitive)
+- `atracciones-cronograma` — sync Cronograma relation for Atracciones when `Fecha` changes (case-insensitive)
+- `gastos-sync` — sync Gastos pages into local SQLite
+
 ## Documentation
 
+- **[Workflows](./workflows.md)** - Workflow behaviors, triggers, and Notion requirements
 - **[Architecture](./architecture.md)** - System design, components, and request flow
-- **[Gastos Feature](./gastos.md)** - Local storage and reload API for Gastos entries
+- **[Gastos Feature](./gastos.md)** - Local storage + reload API (SQLite)
 - **[Testing](./testing.md)** - Running tests, fixtures, and writing new tests
 - **[Extending](./extending.md)** - Adding new workflows and features
-- **[Deployment](./deployment.md)** - Making the server publicly accessible for Notion webhooks
+- **[Deployment](./deployment.md)** - Exposing the server publicly (HTTPS) for Notion webhooks
 
 ## Features
 
@@ -55,6 +104,19 @@ Automatically syncs the `Cronograma` relation in Pasajes entries when the `depar
 |-----------------|--------|
 | Set to date | Links matching Cronograma entry |
 | Cleared | Removes all Cronograma relations |
+
+### Atracciones Sync
+
+Automatically syncs the `Cronograma` relation in Atracciones entries when the `Fecha` property changes:
+
+| Fecha Change | Action |
+|-------------|--------|
+| Set to date | Links matching Cronograma entry |
+| Cleared | Removes all Cronograma relations |
+
+### Gastos Sync
+
+Mirrors Gastos entries into a local SQLite database for querying/analytics and provides a reload API. See **[Gastos Feature](./gastos.md)**.
 
 ## Project Structure
 

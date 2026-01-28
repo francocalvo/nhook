@@ -35,8 +35,9 @@ class MyWorkflow(BaseWorkflow):
 
         Return True if the payload contains the properties you care about.
         """
-        # Example: match when "Status" property is in payload
-        return "Status" in context.payload
+        # Prefer deterministic routing via X-Calvo-Workflow.
+        # If you need heuristic routing, inspect context.payload["data"]["properties"].
+        return context.workflow_name == self.name
 
     async def execute(self, context: WorkflowContext) -> dict[str, Any]:
         """Execute the workflow logic.
@@ -265,7 +266,9 @@ if settings.enable_my_workflow:
 
 ## Workflow Selection Priority
 
-Workflows are matched in registration order. The first workflow where `matches()` returns `True` is executed.
+If `X-Calvo-Workflow` is present, the registry runs the workflow with that exact name.
+
+Otherwise, workflows are matched in registration order and the first workflow where `matches()` returns `True` is executed.
 
 To control priority, register workflows in desired order:
 

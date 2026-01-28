@@ -203,23 +203,31 @@ Both support Python apps with minimal configuration. Set environment variables i
 
 ## Notion Automation Setup
 
-1. Go to your Gastos database in Notion
+1. Go to the target database in Notion (Gastos / Pasajes / Atracciones)
 2. Click the lightning bolt (⚡) → "New automation"
 3. Configure trigger:
-   - **When**: "Property edited"
-   - **Property**: "Date"
+    - **When**: "Property edited"
+    - **Property**: the workflow's input property (e.g. `Date`, `Departure`, `Fecha`)
 4. Add action:
-   - **Action**: "Send webhook"
-   - **URL**: Your public URL (e.g., `https://nhook.yourdomain.com/webhooks/notion`)
-   - **Headers**: Add `X-Calvo-Key` with your secret value
-   - **Body**: Include `id` and `Date` properties
+    - **Action**: "Send webhook"
+    - **URL**: Your public URL (e.g., `https://nhook.yourdomain.com/webhooks/notion`)
+    - **Headers**: Add `X-Calvo-Key` with your secret value
+    - **Headers (recommended)**: Add `X-Calvo-Workflow` with the workflow name
+    - **Body**: Include `id` and the relevant property
 
-Example webhook body template:
+Example webhook body template (Gastos Cronograma / `Date`):
 ```json
 {
   "id": "{page_id}",
   "Date": {Date}
 }
+```
+
+Example headers:
+
+```
+X-Calvo-Key: <WEBHOOK_SECRET_KEY>
+X-Calvo-Workflow: gastos-cronograma
 ```
 
 ## Security Considerations

@@ -19,6 +19,13 @@ uv run pytest tests/test_webhooks.py::test_webhook_handles_single_date
 uv run pytest --cov=src/notion_hook --cov-report=html
 ```
 
+## Linting and formatting
+
+```bash
+uv run ruff check .
+uv run ruff format .
+```
+
 ## Test Structure
 
 ```
@@ -27,7 +34,9 @@ tests/
 ├── test_auth.py             # Authentication tests
 ├── test_health.py           # Health endpoint test
 ├── test_webhooks.py         # Webhook endpoint tests
-└── test_cronograma_sync.py  # Workflow unit tests
+├── test_cronograma_sync.py  # Workflow unit tests
+├── test_pasajes_sync.py     # Workflow unit tests
+└── test_atracciones_sync.py # Workflow unit tests
 ```
 
 ## Fixtures
@@ -87,7 +96,10 @@ Returns valid authentication headers:
 ```python
 @pytest.fixture
 def auth_headers() -> dict[str, str]:
-    return {"X-Calvo-Key": "test-secret-key"}
+    return {
+        "X-Calvo-Key": "test-secret-key",
+        "X-Calvo-Workflow": "gastos-cronograma",
+    }
 ```
 
 ## Writing Tests

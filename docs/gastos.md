@@ -2,7 +2,7 @@
 
 ## Overview
 
-The gastos feature provides local SQLite storage for Notion Gastos entries with full CRUD operations, retry logic, and a REST API for manual reload/sync. This feature enables:
+The gastos feature provides local SQLite storage for Notion Gastos entries with full CRUD operations, retry logic, and a REST API for manual reload/sync. This enables:
 
 - Local querying and analytics of Gastos data
 - Historical tracking of changes
@@ -345,9 +345,13 @@ All gastos feature code has comprehensive test coverage:
 
 | Variable | Description | Required | Default |
 |----------|-------------|----------|---------|
-| `database_path` | SQLite database file path | No | `notion_hook.db` |
-| `max_retries` | Maximum retry attempts for database operations | No | `3` |
-| `retry_delay` | Base delay for retry backoff (seconds) | No | `1.0` |
+The Settings model uses uppercase environment variables:
+
+| Variable | Description | Required | Default |
+|----------|-------------|----------|---------|
+| `DATABASE_PATH` | SQLite database file path | No | `notion_hook.db` |
+| `MAX_RETRIES` | Maximum retry attempts for database operations | No | `3` |
+| `RETRY_DELAY` | Base delay for retry backoff (seconds) | No | `1.0` |
 
 ### Database Path
 

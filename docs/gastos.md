@@ -77,7 +77,7 @@ The gastos feature provides local SQLite storage for Notion Gastos entries with 
 | Notion Property | Type | Field | Notes |
 |----------------|------|-------|-------|
 | **Expense** | title/rich_text | `description` | Text content from title or rich_text |
-| **Category** | multi_select | `category` | Comma-separated if multiple values |
+| **Category** | multi_select/select | `category` | Comma-separated if multiple values |
 | **Amount** | number | `amount` | Float value |
 | **Date** | date | `date` | Extract start date, format as YYYY-MM-DD |
 | **Payment Method** | select | `payment_method` | Select name value |
@@ -89,8 +89,8 @@ The gastos feature provides local SQLite storage for Notion Gastos entries with 
 - Falls back to plain_text if available
 - Returns `None` if property is missing or empty
 
-#### Category (Multi-Select)
-- Extracted from "Category" property (multi_select type)
+#### Category (Multi-Select or Select)
+- Extracted from "Category" property (multi_select preferred, select supported)
 - Multiple values joined with ", " (comma + space)
 - Returns `None` if property is missing or empty
 - Example: `["Food", "Groceries"]` → `"Food, Groceries"`

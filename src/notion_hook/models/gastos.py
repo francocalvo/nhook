@@ -108,8 +108,10 @@ class Gasto(BaseModel):
             description = _extract_text(desc_prop)
 
         category = None
-        if cat_prop := _first_property("Category", "category"):
+        if cat_prop := _first_property("Category", "Categories", "category"):
             category = _extract_multi_select(cat_prop)
+            if category is None:
+                category = _extract_select_name(cat_prop)
 
         amount = None
         if amount_prop := _first_property("Amount", "amount"):

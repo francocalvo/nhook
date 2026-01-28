@@ -308,6 +308,36 @@ class TestGastosSyncWorkflow:
         assert created_gasto.category == "Groceries"
 
     @pytest.mark.asyncio
+    async def test_category_select_value(
+        self, mock_notion_client: AsyncMock, mock_db_client: AsyncMock
+    ) -> None:
+        """Test category extraction with select value."""
+        workflow = GastosSyncWorkflow(mock_notion_client, mock_db_client)
+        payload = make_notion_webhook_payload(
+            page_id="test-page-9",
+            extra_properties={
+                "Category": {
+                    "id": "cat-id",
+                    "type": "select",
+                    "select": {"id": "opt-1", "name": "Travel"},
+                },
+            },
+        )
+        mock_db_client.get_gasto.return_value = None
+
+        context = WorkflowContext(
+            page_id="test-page-9",
+            payload=payload,
+            workflow_name="gastos-sync",
+        )
+
+        result = await workflow.execute(context)
+
+        assert result["operation"] == "create"
+        created_gasto = mock_db_client.create_gasto.call_args[0][0]
+        assert created_gasto.category == "Travel"
+
+    @pytest.mark.asyncio
     async def test_category_multiple_values(
         self, mock_notion_client: AsyncMock, mock_db_client: AsyncMock
     ) -> None:

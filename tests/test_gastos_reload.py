@@ -480,3 +480,61 @@ class TestGastosReloadService:
         gasto = await reload_service.database_client.get_gasto("page-1")
         assert gasto is not None
         assert gasto.category == "Food, Groceries, Household"
+
+    @pytest.mark.asyncio
+    async def test_category_select_value(
+        self,
+        reload_service: GastosReloadService,
+        mock_notion_client: AsyncMock,
+    ) -> None:
+        """Test reload with select category value."""
+        mock_notion_client.query_all_gastos = AsyncMock(
+            return_value=[
+                {
+                    "id": "page-1",
+                    "created_time": "2024-01-01T00:00:00.000Z",
+                    "last_edited_time": "2024-01-01T00:00:00.000Z",
+                    "properties": {
+                        "Payment Method": {
+                            "id": "pm-id",
+                            "type": "select",
+                            "select": {
+                                "id": "opt-1",
+                                "name": "Cash",
+                                "color": "default",
+                            },
+                        },
+                        "Expense": {
+                            "id": "desc-id",
+                            "type": "rich_text",
+                            "rich_text": [
+                                {"type": "text", "text": {"content": "Lunch"}}
+                            ],
+                        },
+                        "Category": {
+                            "id": "cat-id",
+                            "type": "select",
+                            "select": {"id": "opt-1", "name": "Travel"},
+                        },
+                        "Amount": {"id": "amt-id", "type": "number", "number": 15.0},
+                        "Date": {
+                            "id": "date-id",
+                            "type": "date",
+                            "date": {"start": "2024-01-01"},
+                        },
+                    },
+                }
+            ]
+        )
+
+        job_id = await reload_service.create_job(mode=ReloadMode.FULL)
+        await reload_service._execute_job(job_id)
+
+        job = reload_service.get_job(job_id)
+        assert job is not None
+        assert job.status == JobStatus.COMPLETED
+        assert job.progress.created == 1
+
+        gasto = await reload_service.database_client.get_gasto("page-1")
+        assert gasto is not None
+        assert gasto.category == "Travel"

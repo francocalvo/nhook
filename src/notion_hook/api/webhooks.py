@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Annotated, Any
 
-from fastapi import APIRouter, Depends, HTTPException, Request, status
+from fastapi import APIRouter, Depends, Header, HTTPException, Request, status
 
 from notion_hook.core.auth import verify_webhook_key
 from notion_hook.core.exceptions import (
@@ -11,6 +11,7 @@ from notion_hook.core.exceptions import (
     WorkflowNotFoundError,
 )
 from notion_hook.core.logging import get_logger
+from notion_hook.core.utils import get_property_ci
 from notion_hook.models.webhook import DateValue, WebhookResponse, WorkflowContext
 
 logger = get_logger("api.webhooks")
@@ -37,6 +38,7 @@ def get_workflow_registry() -> Any:
 async def handle_notion_webhook(
     request: Request,
     _: Annotated[str, Depends(verify_webhook_key)],
+    x_calvo_workflow: Annotated[str | None, Header()] = None,
 ) -> WebhookResponse:
     """Handle incoming Notion webhook.
 
@@ -46,6 +48,7 @@ async def handle_notion_webhook(
     Args:
         request: The incoming request with JSON payload.
         _: The validated webhook key (from dependency).
+        x_calvo_workflow: Optional workflow name from header.
 
     Returns:
         Response with execution status and results.
@@ -59,27 +62,43 @@ async def handle_notion_webhook(
             detail="Invalid JSON payload",
         ) from e
 
-    page_id = payload.get("id")
+    data = payload.get("data", {})
+    page_id = data.get("id")
     if not page_id:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Missing 'id' in payload",
+            detail="Missing 'data.id' in payload",
         )
 
     logger.info(f"Received webhook for page: {page_id}")
     logger.debug(f"Webhook payload: {payload}")
 
     date_value: DateValue | None = None
-    if date_data := payload.get("Date"):
+    departure_value: DateValue | None = None
+    properties = data.get("properties", {})
+
+    if date_data := get_property_ci(properties, "Date"):
         try:
-            date_value = DateValue.model_validate(date_data)
+            date_value = DateValue.model_validate(
+                date_data.get("date") if date_data else None
+            )
         except Exception as e:
             logger.warning(f"Failed to parse Date value: {e}")
+
+    if departure_data := get_property_ci(properties, "Departure"):
+        try:
+            departure_value = DateValue.model_validate(
+                departure_data.get("date") if departure_data else None
+            )
+        except Exception as e:
+            logger.warning(f"Failed to parse Departure value: {e}")
 
     context = WorkflowContext(
         page_id=page_id,
         payload=payload,
         date_value=date_value,
+        departure_value=departure_value,
+        workflow_name=x_calvo_workflow,
     )
 
     registry = get_workflow_registry()

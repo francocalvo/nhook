@@ -25,7 +25,7 @@ class AtraccionesSyncWorkflow(BaseWorkflow):
 
     name = "atracciones-cronograma"
     description = "Sync Cronograma relation based on Fecha changes"
-    date_property_name = "Fecha"  # NEW
+    date_property_name = "Fecha"
 
     def matches(self, context: WorkflowContext) -> bool:
         """Match if the workflow name matches this workflow.
@@ -51,11 +51,12 @@ class AtraccionesSyncWorkflow(BaseWorkflow):
             WorkflowError: If sync fails.
         """
         page_id = context.page_id
-        date_value = context.date_value  # Changed from fecha_value
+        # Alias for domain-specific clarity
+        fecha_value = context.date_value
 
         logger.info(f"Executing Atracciones sync for page {page_id}")
 
-        if date_value is None:
+        if fecha_value is None:
             logger.info(f"Fecha cleared for {page_id}, removing Cronograma relations")
             logger.debug(
                 f"Calling update_atracciones_cronograma_relation({page_id}, [])"
@@ -64,7 +65,7 @@ class AtraccionesSyncWorkflow(BaseWorkflow):
             logger.info(f"Successfully cleared Cronograma relations for {page_id}")
             return {"updated_relations": []}
 
-        fecha_date = date_value.start
+        fecha_date = fecha_value.start
         logger.debug(f"Fecha date: {fecha_date.isoformat()}")
 
         try:

@@ -22,7 +22,7 @@ class PasajesSyncWorkflow(BaseWorkflow):
 
     name = "pasajes-cronograma"
     description = "Sync Cronograma relation based on departure changes"
-    date_property_name = "Departure"  # NEW
+    date_property_name = "Departure"
 
     def matches(self, context: WorkflowContext) -> bool:
         """Match if the workflow name matches this workflow.
@@ -48,20 +48,21 @@ class PasajesSyncWorkflow(BaseWorkflow):
             WorkflowError: If sync fails.
         """
         page_id = context.page_id
-        date_value = context.date_value  # Changed from departure_value
+        # Alias for domain-specific clarity
+        departure_value = context.date_value
 
         logger.info(f"Executing Pasajes sync for page {page_id}")
 
-        if date_value is None:
+        if departure_value is None:
             logger.info(
-                f"departure cleared for {page_id}, removing Cronograma relations"
+                f"Departure cleared for {page_id}, removing Cronograma relations"
             )
             logger.debug(f"Calling update_pasajes_cronograma_relation({page_id}, [])")
             await self.notion_client.update_pasajes_cronograma_relation(page_id, [])
             logger.info(f"Successfully cleared Cronograma relations for {page_id}")
             return {"updated_relations": []}
 
-        departure_date = date_value.start
+        departure_date = departure_value.start
         logger.debug(f"Departure date: {departure_date.isoformat()}")
 
         try:

@@ -36,6 +36,7 @@ class WorkflowRegistry:
         self.notion_client = notion_client
         self.database_client = database_client
         self._workflows: list[BaseWorkflow] = []
+        self._workflow_by_name: dict[str, BaseWorkflow] = {}
 
     def register(self, workflow_class: type[BaseWorkflow]) -> None:
         """Register a workflow class.
@@ -70,6 +71,7 @@ class WorkflowRegistry:
         else:
             workflow = workflow_class(self.notion_client)
         self._workflows.append(workflow)
+        self._workflow_by_name[workflow.name] = workflow
         logger.info(f"Registered workflow: {workflow.name}")
 
     def get_workflow(self, context: WorkflowContext) -> BaseWorkflow:
@@ -85,14 +87,16 @@ class WorkflowRegistry:
             WorkflowNotFoundError: If no workflow matches.
         """
         if context.workflow_name:
-            for workflow in self._workflows:
-                if workflow.name == context.workflow_name:
-                    logger.debug(f"Matched workflow by name: {workflow.name}")
-                    return workflow
+            # Use dict for O(1) lookup by name
+            workflow = self._workflow_by_name.get(context.workflow_name)
+            if workflow:
+                logger.debug(f"Matched workflow by name: {workflow.name}")
+                return workflow
             raise WorkflowNotFoundError(
                 f"No workflow found with name '{context.workflow_name}'"
             )
 
+        # Linear scan for match-based lookups (less common)
         for workflow in self._workflows:
             if workflow.matches(context):
                 logger.debug(f"Matched workflow: {workflow.name}")
@@ -101,7 +105,7 @@ class WorkflowRegistry:
         raise WorkflowNotFoundError(f"No workflow found for page {context.page_id}")
 
     def get_date_property_name(self, workflow_name: str) -> str | None:
-        """Get the date property name for a workflow.
+        """Get date property name for a workflow.
 
         Args:
             workflow_name: The workflow name to look up.
@@ -110,10 +114,9 @@ class WorkflowRegistry:
             The date property name, or None if workflow not found or
             has no date property.
         """
-        for workflow in self._workflows:
-            if workflow.name == workflow_name:
-                return workflow.date_property_name
-        return None
+        # Use dict for O(1) lookup by name
+        workflow = self._workflow_by_name.get(workflow_name)
+        return workflow.date_property_name if workflow else None
 
     @property
     def workflows(self) -> list[BaseWorkflow]:

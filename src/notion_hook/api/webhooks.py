@@ -74,10 +74,16 @@ async def handle_notion_webhook(
     logger.info(f"Received webhook for page: {page_id}")
     logger.debug(f"Webhook payload: {payload}")
 
+    if not x_calvo_workflow:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Missing required 'X-Calvo-Workflow' header",
+        )
+
     date_value: DateValue | None = None
     properties = data.get("properties", {})
 
-    # NEW: Get date property name from workflow configuration
+    # Get date property name from workflow configuration
     registry = get_workflow_registry()
     if x_calvo_workflow:
         date_property_name = registry.get_date_property_name(x_calvo_workflow)

@@ -7,47 +7,6 @@
 
 Successfully implemented AtraccionesSyncWorkflow following the same pattern as CronogramaSyncWorkflow and PasajesSyncWorkflow. The implementation includes proper datetime parsing, comprehensive tests, and integration testing.
 
-## Critical Issues Fixed ✅
-
-### 1. DateValue Model - DateTime Parsing Support
-**Status**: ✅ Fixed in commit `79c908c`
-
-**Issue**: The `DateValue` model only accepted `date` objects, but Notion can send datetime strings (e.g., `"2026-03-14T10:30:00.000Z"`). This caused parsing failures, resulting in `fecha_value` becoming `None`, which silently cleared relations.
-
-**Fix**: Added custom `@field_validator` that handles both date and datetime strings:
-- Datetime strings are parsed using `datetime.fromisoformat()` and normalized to date
-- Date-only strings are parsed using `date.fromisoformat()`
-- Invalid strings raise clear validation errors
-- Time portions are properly ignored for matching
-
-### 2. Atracciones Test - Real Parsing Path
-**Status**: ✅ Fixed in commit `4b49020`
-
-**Issue**: The `test_execute_handles_datetime_fecha` test was misleading - it manually constructed `DateValue(start=date(...))` instead of testing actual parsing of datetime strings from Notion webhook payloads.
-
-**Fix**: Added 7 comprehensive tests for `DateValue` parser and updated datetime test to actually test parsing path:
-- Date-only string parsing
-- Datetime string parsing (time portion ignored)
-- Datetime with timezone parsing
-- Date range parsing
-- Datetime range parsing
-- Invalid date string raises error
-
-### 3. Integration Tests - Full Webhook Parsing Path
-**Status**: ✅ Fixed in commit `cb78980`
-
-**Issue**: No integration tests verified that actual webhook payloads with datetime strings are correctly parsed end-to-end through the API handler.
-
-**Fix**: Added 5 integration tests covering:
-- Datetime string parsing in webhook payload
-- Date-only string parsing in webhook payload
-- Empty/null Fecha clears relations
-- Case-insensitive property lookup (Fecha, fecha, FECHA)
-
-Also registered `AtraccionesSyncWorkflow` in `test_client` fixture to enable integration tests.
-
----
-
 ## Remaining Issues (Non-Critical)
 
 ### 1. Documentation Clarity in Workflow Docstring
@@ -75,20 +34,13 @@ so only the date portion is used for matching.
 
 ### 2. Hardcoded Workflow Name in matches() Method
 **Severity**: 🟡 Important
-**Location**: `src/notion_hook/workflows/atracciones_sync.py`, line 32
+**Status**: ✅ Fixed in commit `0c01779`
 
-**Issue**: The `matches()` method hardcodes the workflow name string literal `"atracciones-cronograma"`. This is duplicated across `CronogramaSyncWorkflow` and `PasajesSyncWorkflow`.
+**Issue**: The `matches()` method hardcoded the workflow name string literal. This was duplicated across `CronogramaSyncWorkflow` and `PasajesSyncWorkflow`.
 
 **Impact**: Minor code duplication and potential for typos.
 
-**Current Code**:
-```python
-def matches(self, context: WorkflowContext) -> bool:
-    """Match if the workflow name is 'atracciones-cronograma'."""
-    return context.workflow_name == "atracciones-cronograma"
-```
-
-**Suggested Fix**: Use `self.name` for consistency:
+**Fix Applied**: Changed all three workflows to use `self.name`:
 ```python
 def matches(self, context: WorkflowContext) -> bool:
     """Match if the workflow name matches this workflow."""
@@ -96,10 +48,15 @@ def matches(self, context: WorkflowContext) -> bool:
 ```
 
 **Rationale**:
-- Eliminates string literal duplication
-- Reduces risk of typos
-- Consistent across all workflow implementations
-- Single source of truth (the `name` class attribute)
+- ✅ Eliminates string literal duplication
+- ✅ Reduces risk of typos
+- ✅ Consistent across all workflow implementations
+- ✅ Single source of truth (the `name` class attribute)
+
+**Workflows Updated**:
+- AtraccionesSyncWorkflow
+- CronogramaSyncWorkflow
+- PasajesSyncWorkflow
 
 ---
 

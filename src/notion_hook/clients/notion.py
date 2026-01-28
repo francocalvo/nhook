@@ -234,3 +234,63 @@ class NotionClient:
         num_relations = len(cronograma_page_ids)
         logger.info(f"Updating Pasajes {page_id} with {num_relations} relations")
         return await self.update_page(page_id, properties)
+
+    async def query_all_gastos(self, page_size: int = 100) -> list[dict[str, Any]]:
+        """Query all Gastos from the Gastos database with pagination.
+
+        Args:
+            page_size: Number of results per page (max 100 per Notion API).
+
+        Returns:
+            List of all Gastos pages from Notion.
+
+        Raises:
+            NotionClientError: If the request fails.
+        """
+        if page_size > 100:
+            logger.warning(
+                f"Page size {page_size} exceeds Notion API limit of 100, using 100"
+            )
+            page_size = 100
+
+        all_results: list[dict[str, Any]] = []
+        has_more = True
+        start_cursor: str | None = None
+        page_num = 0
+
+        logger.info(
+            f"Querying all Gastos from database {self.settings.gastos_database_id}"
+        )
+
+        while has_more:
+            page_num += 1
+            body: dict[str, Any] = {"page_size": page_size}
+            if start_cursor:
+                body["start_cursor"] = start_cursor
+
+            response = await self.client.post(
+                f"/databases/{self.settings.gastos_database_id}/query",
+                json=body,
+            )
+
+            if response.status_code != 200:
+                raise NotionClientError(
+                    f"Failed to query Gastos database (page {page_num}): "
+                    f"{response.text}",
+                    status_code=response.status_code,
+                )
+
+            data = response.json()
+            page_results = data.get("results", [])
+            all_results.extend(page_results)
+
+            logger.info(
+                f"Fetched page {page_num} with {len(page_results)} Gastos, "
+                f"total so far: {len(all_results)}"
+            )
+
+            has_more = data.get("has_more", False)
+            start_cursor = data.get("next_cursor")
+
+        logger.info(f"Finished querying Gastos: {len(all_results)} total records")
+        return all_results

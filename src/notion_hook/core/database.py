@@ -274,6 +274,186 @@ class DatabaseClient:
 
         return await self._retry_operation("delete", _delete)
 
+    async def clear_gastos(self) -> int:
+        """Delete all gastos.
+
+        Returns:
+            Number of rows deleted.
+
+        Raises:
+            DatabaseError: If the operation fails after retries.
+        """
+
+        async def _clear() -> int:
+            async with self.conn.execute("SELECT COUNT(*) FROM gastos") as cursor:
+                row = await cursor.fetchone()
+                count = int(row[0]) if row else 0
+
+            await self.conn.execute("DELETE FROM gastos")
+            await self.conn.commit()
+            return count
+
+        return await self._retry_operation("clear_gastos", _clear)
+
+    async def delete_gastos(self, page_ids: list[str]) -> int:
+        """Delete gastos by page_id in batches.
+
+        Args:
+            page_ids: Page IDs to delete.
+
+        Returns:
+            Number of rows deleted.
+
+        Raises:
+            DatabaseError: If the operation fails after retries.
+        """
+        if not page_ids:
+            return 0
+
+        async def _delete_many() -> int:
+            deleted = 0
+            chunk_size = 900  # stay below SQLite variable limit
+
+            await self.conn.execute("BEGIN")
+            try:
+                for i in range(0, len(page_ids), chunk_size):
+                    chunk = page_ids[i : i + chunk_size]
+                    placeholders = ",".join("?" for _ in chunk)
+                    cursor = await self.conn.execute(
+                        f"DELETE FROM gastos WHERE page_id IN ({placeholders})",
+                        chunk,
+                    )
+                    if cursor.rowcount and cursor.rowcount > 0:
+                        deleted += cursor.rowcount
+
+                await self.conn.commit()
+            except Exception:
+                await self.conn.rollback()
+                raise
+
+            return deleted
+
+        return await self._retry_operation("delete_many", _delete_many)
+
+    async def sync_gastos_batch(
+        self,
+        gastos: list[Gasto],
+        *,
+        update_if_changed: bool,
+    ) -> tuple[int, int, int, int]:
+        """Insert/update a batch of gastos in a single transaction.
+
+        Args:
+            gastos: Gastos to sync.
+            update_if_changed: If True, only updates when fields changed.
+
+        Returns:
+            Tuple of (created, updated, skipped, failed).
+
+        Raises:
+            DatabaseError: If the operation fails after retries.
+        """
+        if not gastos:
+            return (0, 0, 0, 0)
+
+        async def _sync() -> tuple[int, int, int, int]:
+            page_ids = [g.page_id for g in gastos]
+            placeholders = ",".join("?" for _ in page_ids)
+
+            existing: dict[str, tuple[object, object, object, object, object]] = {}
+            async with self.conn.execute(
+                f"""
+                SELECT page_id, payment_method, description, amount, date, updated_at
+                FROM gastos
+                WHERE page_id IN ({placeholders})
+                """,
+                page_ids,
+            ) as cursor:
+                rows = await cursor.fetchall()
+                for row in rows:
+                    existing[str(row[0])] = (row[1], row[2], row[3], row[4], row[5])
+
+            created = 0
+            updated = 0
+            skipped = 0
+            failed = 0
+
+            await self.conn.execute("BEGIN")
+            try:
+                for gasto in gastos:
+                    row = existing.get(gasto.page_id)
+                    if row is not None:
+                        if update_if_changed and (
+                            row[0] == gasto.payment_method
+                            and row[1] == gasto.description
+                            and row[2] == gasto.amount
+                            and row[3] == gasto.date
+                            and row[4] == gasto.updated_at
+                        ):
+                            skipped += 1
+                            continue
+
+                        try:
+                            await self.conn.execute(
+                                """UPDATE gastos
+                                SET payment_method = ?, description = ?, amount = ?,
+                                date = ?, updated_at = ? WHERE page_id = ?""",
+                                (
+                                    gasto.payment_method,
+                                    gasto.description,
+                                    gasto.amount,
+                                    gasto.date,
+                                    gasto.updated_at,
+                                    gasto.page_id,
+                                ),
+                            )
+                            updated += 1
+                        except Exception as e:
+                            failed += 1
+                            logger.warning(
+                                f"Failed to update gasto {gasto.page_id}: {e}"
+                            )
+                    else:
+                        try:
+                            await self.conn.execute(
+                                """
+                                INSERT INTO gastos (
+                                    page_id,
+                                    payment_method,
+                                    description,
+                                    amount,
+                                    date,
+                                    created_at,
+                                    updated_at
+                                )
+                                VALUES (?, ?, ?, ?, ?, ?, ?)
+                                """,
+                                (
+                                    gasto.page_id,
+                                    gasto.payment_method,
+                                    gasto.description,
+                                    gasto.amount,
+                                    gasto.date,
+                                    gasto.created_at,
+                                    gasto.updated_at,
+                                ),
+                            )
+                            created += 1
+                        except Exception as e:
+                            failed += 1
+                            logger.warning(
+                                f"Failed to create gasto {gasto.page_id}: {e}"
+                            )
+
+                await self.conn.commit()
+            except Exception:
+                await self.conn.rollback()
+                raise
+
+            return (created, updated, skipped, failed)
+
+        return await self._retry_operation("sync_batch", _sync)
+
     async def list_gastos(self, limit: int = 100, offset: int = 0) -> list[Gasto]:
         """List gastos with pagination.
 
@@ -308,6 +488,23 @@ class DatabaseClient:
                 ]
 
         return await self._retry_operation("list", _list)
+
+    async def get_all_gastos_page_ids(self) -> set[str]:
+        """Get all Gastos page IDs from the database.
+
+        Returns:
+            Set of all page IDs.
+
+        Raises:
+            DatabaseError: If the operation fails after retries.
+        """
+
+        async def _get_all_ids() -> set[str]:
+            async with self.conn.execute("SELECT page_id FROM gastos") as cursor:
+                rows = await cursor.fetchall()
+                return {row[0] for row in rows}
+
+        return await self._retry_operation("get_all_ids", _get_all_ids)
 
     async def log_failure(
         self, page_id: str, operation: str, error_message: str, retry_count: int = 0
@@ -347,7 +544,8 @@ class DatabaseClient:
                 ),
             )
             await self.conn.commit()
-            return cursor.lastrowid
+            last_id = cursor.lastrowid
+            return last_id if last_id is not None else 0
 
         return await self._retry_operation("log_failure", _log)
 

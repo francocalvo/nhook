@@ -76,6 +76,7 @@ async def handle_notion_webhook(
 
     date_value: DateValue | None = None
     departure_value: DateValue | None = None
+    fecha_value: DateValue | None = None
     properties = data.get("properties", {})
 
     if date_data := get_property_ci(properties, "Date"):
@@ -94,11 +95,20 @@ async def handle_notion_webhook(
         except Exception as e:
             logger.warning(f"Failed to parse Departure value: {e}")
 
+    if fecha_data := get_property_ci(properties, "Fecha"):
+        try:
+            fecha_value = DateValue.model_validate(
+                fecha_data.get("date") if fecha_data else None
+            )
+        except Exception as e:
+            logger.warning(f"Failed to parse Fecha value: {e}")
+
     context = WorkflowContext(
         page_id=page_id,
         payload=payload,
         date_value=date_value,
         departure_value=departure_value,
+        fecha_value=fecha_value,
         workflow_name=x_calvo_workflow,
     )
 

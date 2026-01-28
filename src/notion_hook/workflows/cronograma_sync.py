@@ -26,7 +26,7 @@ class CronogramaSyncWorkflow(BaseWorkflow):
     description = "Sync Cronograma relation based on Date changes"
 
     def matches(self, context: WorkflowContext) -> bool:
-        """Match if the workflow name is 'gastos-cronograma'.
+        """Match if the workflow name matches this workflow.
 
         Args:
             context: The webhook context.
@@ -34,7 +34,7 @@ class CronogramaSyncWorkflow(BaseWorkflow):
         Returns:
             True if this workflow should handle the webhook.
         """
-        return context.workflow_name == "gastos-cronograma"
+        return context.workflow_name == self.name
 
     async def execute(self, context: WorkflowContext) -> dict[str, Any]:
         """Execute the Cronograma sync workflow.

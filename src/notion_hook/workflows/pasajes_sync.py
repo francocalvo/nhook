@@ -24,7 +24,7 @@ class PasajesSyncWorkflow(BaseWorkflow):
     description = "Sync Cronograma relation based on departure changes"
 
     def matches(self, context: WorkflowContext) -> bool:
-        """Match if the workflow name is 'pasajes-cronograma'.
+        """Match if the workflow name matches this workflow.
 
         Args:
             context: The webhook context.
@@ -32,7 +32,7 @@ class PasajesSyncWorkflow(BaseWorkflow):
         Returns:
             True if this workflow should handle the webhook.
         """
-        return context.workflow_name == "pasajes-cronograma"
+        return context.workflow_name == self.name
 
     async def execute(self, context: WorkflowContext) -> dict[str, Any]:
         """Execute the Pasajes sync workflow.

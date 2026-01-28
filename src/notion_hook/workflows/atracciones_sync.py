@@ -24,7 +24,7 @@ class AtraccionesSyncWorkflow(BaseWorkflow):
     description = "Sync Cronograma relation based on Fecha changes"
 
     def matches(self, context: WorkflowContext) -> bool:
-        """Match if the workflow name is 'atracciones-cronograma'.
+        """Match if the workflow name matches this workflow.
 
         Args:
             context: The webhook context.
@@ -32,7 +32,7 @@ class AtraccionesSyncWorkflow(BaseWorkflow):
         Returns:
             True if this workflow should handle the webhook.
         """
-        return context.workflow_name == "atracciones-cronograma"
+        return context.workflow_name == self.name
 
     async def execute(self, context: WorkflowContext) -> dict[str, Any]:
         """Execute the Atracciones sync workflow.

@@ -100,6 +100,21 @@ class WorkflowRegistry:
 
         raise WorkflowNotFoundError(f"No workflow found for page {context.page_id}")
 
+    def get_date_property_name(self, workflow_name: str) -> str | None:
+        """Get the date property name for a workflow.
+
+        Args:
+            workflow_name: The workflow name to look up.
+
+        Returns:
+            The date property name, or None if workflow not found or
+            has no date property.
+        """
+        for workflow in self._workflows:
+            if workflow.name == workflow_name:
+                return workflow.date_property_name
+        return None
+
     @property
     def workflows(self) -> list[BaseWorkflow]:
         """Get all registered workflows."""

@@ -75,44 +75,27 @@ async def handle_notion_webhook(
     logger.debug(f"Webhook payload: {payload}")
 
     date_value: DateValue | None = None
-    departure_value: DateValue | None = None
-    fecha_value: DateValue | None = None
     properties = data.get("properties", {})
 
-    if date_data := get_property_ci(properties, "Date"):
-        try:
-            date_value = DateValue.model_validate(
-                date_data.get("date") if date_data else None
-            )
-        except Exception as e:
-            logger.warning(f"Failed to parse Date value: {e}")
-
-    if departure_data := get_property_ci(properties, "Departure"):
-        try:
-            departure_value = DateValue.model_validate(
-                departure_data.get("date") if departure_data else None
-            )
-        except Exception as e:
-            logger.warning(f"Failed to parse Departure value: {e}")
-
-    if fecha_data := get_property_ci(properties, "Fecha"):
-        try:
-            fecha_value = DateValue.model_validate(
-                fecha_data.get("date") if fecha_data else None
-            )
-        except Exception as e:
-            logger.warning(f"Failed to parse Fecha value: {e}")
+    # NEW: Get date property name from workflow configuration
+    registry = get_workflow_registry()
+    if x_calvo_workflow:
+        date_property_name = registry.get_date_property_name(x_calvo_workflow)
+        if date_property_name:
+            if date_data := get_property_ci(properties, date_property_name):
+                try:
+                    date_value = DateValue.model_validate(
+                        date_data.get("date") if date_data else None
+                    )
+                except Exception as e:
+                    logger.warning(f"Failed to parse {date_property_name} value: {e}")
 
     context = WorkflowContext(
         page_id=page_id,
         payload=payload,
-        date_value=date_value,
-        departure_value=departure_value,
-        fecha_value=fecha_value,
+        date_value=date_value,  # Single field for all workflows
         workflow_name=x_calvo_workflow,
     )
-
-    registry = get_workflow_registry()
 
     try:
         workflow = registry.get_workflow(context)

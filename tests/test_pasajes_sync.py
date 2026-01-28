@@ -17,7 +17,7 @@ class TestPasajesSyncWorkflow:
         context = WorkflowContext(
             page_id="test-id",
             payload={"data": {"properties": {"Departure": {"start": "2026-03-14"}}}},
-            departure_value=DateValue(start=date(2026, 3, 14)),
+            date_value=DateValue(start=date(2026, 3, 14)),
             workflow_name="pasajes-cronograma",
         )
         assert workflow.matches(context) is True
@@ -29,7 +29,7 @@ class TestPasajesSyncWorkflow:
         context = WorkflowContext(
             page_id="test-id",
             payload={"data": {"properties": {"departure": {"start": "2026-03-14"}}}},
-            departure_value=DateValue(start=date(2026, 3, 14)),
+            date_value=DateValue(start=date(2026, 3, 14)),
             workflow_name="pasajes-cronograma",
         )
         assert workflow.matches(context) is True
@@ -53,7 +53,7 @@ class TestPasajesSyncWorkflow:
         context = WorkflowContext(
             page_id="test-page-id",
             payload={"id": "test-page-id"},
-            departure_value=None,
+            date_value=None,
             workflow_name="pasajes-cronograma",
         )
 
@@ -79,7 +79,7 @@ class TestPasajesSyncWorkflow:
                 "id": "test-page-id",
                 "Departure": {"start": "2026-03-14"},
             },
-            departure_value=DateValue(start=date(2026, 3, 14)),
+            date_value=DateValue(start=date(2026, 3, 14)),
             workflow_name="pasajes-cronograma",
         )
 

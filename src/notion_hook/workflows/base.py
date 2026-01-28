@@ -17,6 +17,7 @@ class BaseWorkflow(ABC):
 
     name: str = "base"
     description: str = "Base workflow"
+    date_property_name: str | None = None  # Property name to extract date from
 
     def __init__(self, notion_client: NotionClient) -> None:
         """Initialize workflow with Notion client.

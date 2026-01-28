@@ -67,7 +67,7 @@ class TestAtraccionesSyncWorkflow:
         context = WorkflowContext(
             page_id="test-id",
             payload={"data": {"properties": {"Fecha": {"start": "2026-03-14"}}}},
-            fecha_value=DateValue(start=date(2026, 3, 14)),
+            date_value=DateValue(start=date(2026, 3, 14)),
             workflow_name="atracciones-cronograma",
         )
         assert workflow.matches(context) is True
@@ -93,7 +93,7 @@ class TestAtraccionesSyncWorkflow:
         context = WorkflowContext(
             page_id="test-page-id",
             payload={"id": "test-page-id"},
-            fecha_value=None,
+            date_value=None,
             workflow_name="atracciones-cronograma",
         )
 
@@ -120,7 +120,7 @@ class TestAtraccionesSyncWorkflow:
                 "id": "test-page-id",
                 "Fecha": {"start": "2026-03-14"},
             },
-            fecha_value=DateValue(start=date(2026, 3, 14)),
+            date_value=DateValue(start=date(2026, 3, 14)),
             workflow_name="atracciones-cronograma",
         )
 
@@ -157,7 +157,7 @@ class TestAtraccionesSyncWorkflow:
                 "id": "test-page-id",
                 "Fecha": {"start": "2026-03-14T10:30:00.000Z"},
             },
-            fecha_value=parsed_fecha,
+            date_value=parsed_fecha,
             workflow_name="atracciones-cronograma",
         )
 
@@ -186,7 +186,7 @@ class TestAtraccionesSyncWorkflow:
                 "id": "test-page-id",
                 "Fecha": {"start": "2026-03-14"},
             },
-            fecha_value=DateValue(start=date(2026, 3, 14)),
+            date_value=DateValue(start=date(2026, 3, 14)),
             workflow_name="atracciones-cronograma",
         )
 

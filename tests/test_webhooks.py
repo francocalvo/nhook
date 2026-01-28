@@ -90,3 +90,99 @@ def test_webhook_without_workflow_header_no_match(
     data = response.json()
     assert data["success"] is False
     assert "No workflow found" in data["message"]
+
+
+def test_webhook_case_insensitive_date_lowercase(
+    test_client: TestClient, auth_headers: dict[str, str]
+) -> None:
+    """Test webhook handles lowercase 'date' property."""
+    payload = make_notion_webhook_payload()
+    payload["data"]["properties"] = {
+        "date": {
+            "id": "date-property-id",
+            "type": "date",
+            "date": {"start": "2026-03-14", "end": None, "time_zone": None},
+        }
+    }
+    response = test_client.post("/webhooks/notion", json=payload, headers=auth_headers)
+    assert response.status_code == 200
+    data = response.json()
+    assert data["success"] is True
+
+
+def test_webhook_case_insensitive_date_uppercase(
+    test_client: TestClient, auth_headers: dict[str, str]
+) -> None:
+    """Test webhook handles uppercase 'DATE' property."""
+    payload = make_notion_webhook_payload()
+    payload["data"]["properties"] = {
+        "DATE": {
+            "id": "date-property-id",
+            "type": "date",
+            "date": {"start": "2026-03-14", "end": None, "time_zone": None},
+        }
+    }
+    response = test_client.post("/webhooks/notion", json=payload, headers=auth_headers)
+    assert response.status_code == 200
+    data = response.json()
+    assert data["success"] is True
+
+
+def test_webhook_case_insensitive_date_mixed_case(
+    test_client: TestClient, auth_headers: dict[str, str]
+) -> None:
+    """Test webhook handles mixed case 'dAtE' property."""
+    payload = make_notion_webhook_payload()
+    payload["data"]["properties"] = {
+        "dAtE": {
+            "id": "date-property-id",
+            "type": "date",
+            "date": {"start": "2026-03-14", "end": None, "time_zone": None},
+        }
+    }
+    response = test_client.post("/webhooks/notion", json=payload, headers=auth_headers)
+    assert response.status_code == 200
+    data = response.json()
+    assert data["success"] is True
+
+
+def test_webhook_case_insensitive_departure_lowercase(
+    test_client: TestClient, auth_headers: dict[str, str]
+) -> None:
+    """Test webhook handles lowercase 'departure' property."""
+    headers = auth_headers.copy()
+    headers["X-Calvo-Workflow"] = "pasajes-cronograma"
+    payload = make_notion_webhook_payload(
+        extra_properties={
+            "departure": {
+                "id": "departure-property-id",
+                "type": "date",
+                "date": {"start": "2026-03-15", "end": None, "time_zone": None},
+            }
+        }
+    )
+    response = test_client.post("/webhooks/notion", json=payload, headers=headers)
+    assert response.status_code == 200
+    data = response.json()
+    assert data["success"] is True
+
+
+def test_webhook_case_insensitive_departure_uppercase(
+    test_client: TestClient, auth_headers: dict[str, str]
+) -> None:
+    """Test webhook handles uppercase 'DEPARTURE' property."""
+    headers = auth_headers.copy()
+    headers["X-Calvo-Workflow"] = "pasajes-cronograma"
+    payload = make_notion_webhook_payload(
+        extra_properties={
+            "DEPARTURE": {
+                "id": "departure-property-id",
+                "type": "date",
+                "date": {"start": "2026-03-15", "end": None, "time_zone": None},
+            }
+        }
+    )
+    response = test_client.post("/webhooks/notion", json=payload, headers=headers)
+    assert response.status_code == 200
+    data = response.json()
+    assert data["success"] is True

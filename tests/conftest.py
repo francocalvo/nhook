@@ -119,6 +119,7 @@ def make_notion_webhook_payload(
     page_id: str = "test-page-id",
     date_start: str | None = "2026-03-14",
     date_end: str | None = None,
+    property_name: str = "Date",
     extra_properties: dict[str, Any] | None = None,
 ) -> dict:
     """Create a realistic Notion webhook payload.
@@ -127,6 +128,7 @@ def make_notion_webhook_payload(
         page_id: The Notion page ID.
         date_start: Start date string in YYYY-MM-DD format, or None.
         date_end: End date string in YYYY-MM-DD format, or None.
+        property_name: Name of the date property (e.g., "Date", "Fecha", "Departure").
         extra_properties: Additional properties to include.
 
     Returns:
@@ -168,14 +170,14 @@ def make_notion_webhook_payload(
         payload["data"]["properties"].update(extra_properties)
 
     if date_start is None and date_end is None:
-        payload["data"]["properties"]["Date"] = {
-            "id": "date-property-id",
+        payload["data"]["properties"][property_name] = {
+            "id": f"{property_name.lower()}-property-id",
             "type": "date",
             "date": None,
         }
     elif date_start is not None:
-        payload["data"]["properties"]["Date"] = {
-            "id": "date-property-id",
+        payload["data"]["properties"][property_name] = {
+            "id": f"{property_name.lower()}-property-id",
             "type": "date",
             "date": {"start": date_start, "end": date_end, "time_zone": None},
         }
@@ -200,52 +202,10 @@ def make_atracciones_webhook_payload(
     Returns:
         Dictionary representing Notion's webhook payload structure.
     """
-    payload = {
-        "source": {
-            "type": "automation",
-            "automation_id": "automation-123",
-            "action_id": "action-456",
-            "event_id": "event-789",
-            "attempt": 1,
-        },
-        "data": {
-            "object": "page",
-            "id": page_id,
-            "created_time": "2026-01-27T00:24:00.000Z",
-            "last_edited_time": "2026-01-27T20:52:00.000Z",
-            "created_by": {
-                "object": "user",
-                "id": "b5d45151-0759-4d92-8780-c7b0f004008b",
-            },
-            "last_edited_by": {
-                "object": "user",
-                "id": "b5d45151-0759-4d92-8780-c7b0f004008b",
-            },
-            "parent": {
-                "type": "data_source_id",
-                "data_source_id": "2e2f6e7f-0572-8010-9fb8-000b7db49de1",
-                "database_id": "2e2f6e7f-0572-800c-962a-e8c9bf6cca51",
-            },
-            "archived": False,
-            "in_trash": False,
-            "properties": {},
-        },
-    }
-
-    if extra_properties:
-        payload["data"]["properties"].update(extra_properties)
-
-    if fecha_start is None and fecha_end is None:
-        payload["data"]["properties"]["Fecha"] = {
-            "id": "fecha-property-id",
-            "type": "date",
-            "date": None,
-        }
-    elif fecha_start is not None:
-        payload["data"]["properties"]["Fecha"] = {
-            "id": "fecha-property-id",
-            "type": "date",
-            "date": {"start": fecha_start, "end": fecha_end, "time_zone": None},
-        }
-
-    return payload
+    return make_notion_webhook_payload(
+        page_id=page_id,
+        date_start=fecha_start,
+        date_end=fecha_end,
+        property_name="Fecha",
+        extra_properties=extra_properties,
+    )

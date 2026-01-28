@@ -9,6 +9,53 @@ from notion_hook.models.webhook import DateValue, WorkflowContext
 from notion_hook.workflows.atracciones_sync import AtraccionesSyncWorkflow
 
 
+class TestDateValue:
+    """Tests for DateValue model with datetime support."""
+
+    def test_parse_date_string(self) -> None:
+        """Test DateValue parses date-only strings."""
+        fecha_dict = {"start": "2026-03-14"}
+        parsed = DateValue.model_validate(fecha_dict)
+        assert parsed.start == date(2026, 3, 14)
+        assert parsed.end is None
+
+    def test_parse_datetime_string(self) -> None:
+        """Test DateValue parses datetime strings and extracts date."""
+        fecha_dict = {"start": "2026-03-14T10:30:00.000Z"}
+        parsed = DateValue.model_validate(fecha_dict)
+        # Time portion should be ignored, only date kept
+        assert parsed.start == date(2026, 3, 14)
+        assert parsed.end is None
+
+    def test_parse_datetime_with_timezone(self) -> None:
+        """Test DateValue handles datetime with timezone."""
+        fecha_dict = {"start": "2026-03-14T10:30:00+03:00"}
+        parsed = DateValue.model_validate(fecha_dict)
+        assert parsed.start == date(2026, 3, 14)
+
+    def test_parse_date_range(self) -> None:
+        """Test DateValue parses date range."""
+        fecha_dict = {"start": "2026-03-14", "end": "2026-03-16"}
+        parsed = DateValue.model_validate(fecha_dict)
+        assert parsed.start == date(2026, 3, 14)
+        assert parsed.end == date(2026, 3, 16)
+
+    def test_parse_datetime_range(self) -> None:
+        """Test DateValue parses datetime range and extracts dates."""
+        fecha_dict = {
+            "start": "2026-03-14T10:30:00.000Z",
+            "end": "2026-03-16T18:45:00.000Z",
+        }
+        parsed = DateValue.model_validate(fecha_dict)
+        assert parsed.start == date(2026, 3, 14)
+        assert parsed.end == date(2026, 3, 16)
+
+    def test_invalid_date_string_raises_error(self) -> None:
+        """Test DateValue raises error for invalid date string."""
+        with pytest.raises(ValueError, match="Unable to parse date string"):
+            DateValue.model_validate({"start": "not-a-date"})
+
+
 class TestAtraccionesSyncWorkflow:
     """Tests for the AtraccionesSyncWorkflow."""
 
@@ -96,6 +143,13 @@ class TestAtraccionesSyncWorkflow:
             {"id": "cronograma-1"},
         ]
 
+        # Test actual parsing of datetime string through DateValue
+        fecha_dict = {"start": "2026-03-14T10:30:00.000Z"}
+        parsed_fecha = DateValue.model_validate(fecha_dict)
+
+        # Verify datetime string is parsed and normalized to date
+        assert parsed_fecha.start == date(2026, 3, 14)
+
         workflow = AtraccionesSyncWorkflow(mock_notion_client)
         context = WorkflowContext(
             page_id="test-page-id",
@@ -103,7 +157,7 @@ class TestAtraccionesSyncWorkflow:
                 "id": "test-page-id",
                 "Fecha": {"start": "2026-03-14T10:30:00.000Z"},
             },
-            fecha_value=DateValue(start=date(2026, 3, 14)),
+            fecha_value=parsed_fecha,
             workflow_name="atracciones-cronograma",
         )
 

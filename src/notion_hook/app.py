@@ -14,6 +14,7 @@ from notion_hook.core.database import DatabaseClient
 from notion_hook.core.logging import setup_logging
 from notion_hook.core.middleware import LoggingMiddleware
 from notion_hook.services.gastos_reload import GastosReloadService
+from notion_hook.workflows.atracciones_sync import AtraccionesSyncWorkflow
 from notion_hook.workflows.cronograma_sync import CronogramaSyncWorkflow
 from notion_hook.workflows.gastos_sync import GastosSyncWorkflow
 from notion_hook.workflows.pasajes_sync import PasajesSyncWorkflow
@@ -62,6 +63,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         _workflow_registry.register(CronogramaSyncWorkflow)
         _workflow_registry.register(PasajesSyncWorkflow)
         _workflow_registry.register(GastosSyncWorkflow)
+        _workflow_registry.register(AtraccionesSyncWorkflow)
         created_registry = True
 
     if _reload_service is None:

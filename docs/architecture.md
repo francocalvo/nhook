@@ -39,9 +39,11 @@ src/notion_hook/
 ├── api/                   # HTTP layer
 │   ├── routes.py          # Router aggregation
 │   ├── webhooks.py        # Webhook endpoint
-│   └── health.py          # Health check
+│   ├── health.py          # Health check
+│   └── reload.py         # Gastos reload endpoint
 ├── core/                  # Shared utilities
 │   ├── auth.py            # Authentication
+│   ├── database.py        # SQLite database client
 │   ├── exceptions.py      # Custom exceptions
 │   └── logging.py         # Logging configuration
 ├── clients/               # External service clients
@@ -50,9 +52,13 @@ src/notion_hook/
 │   ├── base.py            # Abstract workflow class
 │   ├── registry.py        # Workflow dispatch
 │   ├── cronograma_sync.py # Cronograma sync implementation
-│   └── pasajes_sync.py    # Pasajes sync implementation
+│   ├── pasajes_sync.py    # Pasajes sync implementation
+│   └── gastos_sync.py    # Gastos sync implementation
+├── services/              # Business services
+│   └── gastos_reload.py   # Gastos reload service
 └── models/                # Data models
-    └── webhook.py         # Pydantic models
+    ├── webhook.py         # Pydantic models for webhooks
+    └── gastos.py         # Pydantic models for gastos
 ```
 
 ## Components
@@ -167,9 +173,46 @@ The workflow that syncs Cronograma relations for Pasajes entries:
 
 1. **Matches** when payload contains `departure` property
 2. **Execution logic**:
-   - Departure is null → Clear Cronograma relation
-   - Departure is set → Find matching Cronograma entry by date
+    - Departure is null → Clear Cronograma relation
+    - Departure is set → Find matching Cronograma entry by date
 3. **Updates** the Pasajes page with found Cronograma page IDs
+
+#### Gastos Sync (`workflows/gastos_sync.py`)
+
+The workflow that syncs Gastos entries to local SQLite database:
+
+1. **Matches** when workflow name is `gastos-sync`
+2. **Execution logic**:
+    - Detects operation type (CREATE/UPDATE/DELETE)
+    - Extracts properties (Expense, Category, Amount, Date, Payment Method)
+    - Performs corresponding database operation with retry logic
+    - Logs failures to `fail_log` table
+3. **Notion Property Mapping**:
+    - `Expense` (title/rich_text) → `description`
+    - `Category` (multi_select) → `category` (comma-separated)
+    - `Amount` (number) → `amount`
+    - `Date` (date) → `date` (YYYY-MM-DD)
+    - `Payment Method` (select) → `payment_method`
+
+#### Gastos Reload Service (`services/gastos_reload.py`)
+
+The service that provides manual reload from Notion to local database:
+
+1. **Features**:
+    - Full reload (delete all, reload from Notion)
+    - Incremental reload (update changed, delete missing)
+    - Batch processing for performance
+    - Job tracking with progress
+2. **API Endpoints**:
+    - `POST /api/gastos/reload` - Start reload job
+    - `GET /api/gastos/reload/{job_id}` - Get job status
+3. **Use Cases**:
+    - Initial deployment (seed database)
+    - Recovery from missed webhooks
+    - Periodic full sync
+    - Data consistency verification
+
+See **[Gastos Feature](./gastos.md)** for complete documentation.
 
 ## Request Flow
 

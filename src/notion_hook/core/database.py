@@ -74,13 +74,15 @@ class DatabaseClient:
                 page_id TEXT PRIMARY KEY,
                 payment_method TEXT,
                 description TEXT,
+                category TEXT,
                 amount REAL,
-                date TEXT,
+                date DATE,
                 created_at TIMESTAMP NOT NULL,
                 updated_at TIMESTAMP NOT NULL
             )
         """
         )
+        await self._ensure_gastos_schema()
         await self.conn.execute(
             """
             CREATE TABLE IF NOT EXISTS fail_log (
@@ -105,6 +107,15 @@ class DatabaseClient:
         )
         await self.conn.commit()
 
+    async def _ensure_gastos_schema(self) -> None:
+        """Ensure gastos table has expected columns."""
+        async with self.conn.execute("PRAGMA table_info(gastos)") as cursor:
+            rows = await cursor.fetchall()
+            existing = {row[1] for row in rows}
+
+        if "category" not in existing:
+            await self.conn.execute("ALTER TABLE gastos ADD COLUMN category TEXT")
+
     async def get_gasto(self, page_id: str) -> Gasto | None:
         """Retrieve a single gasto by page_id.
 
@@ -120,7 +131,13 @@ class DatabaseClient:
 
         async def _get() -> Gasto | None:
             async with self.conn.execute(
-                "SELECT * FROM gastos WHERE page_id = ?", (page_id,)
+                """
+                SELECT page_id, payment_method, description, category,
+                amount, date, created_at, updated_at
+                FROM gastos
+                WHERE page_id = ?
+                """,
+                (page_id,),
             ) as cursor:
                 row = await cursor.fetchone()
                 if row:
@@ -128,10 +145,11 @@ class DatabaseClient:
                         page_id=row[0],
                         payment_method=row[1],
                         description=row[2],
-                        amount=row[3],
-                        date=row[4],
-                        created_at=row[5],
-                        updated_at=row[6],
+                        category=row[3],
+                        amount=row[4],
+                        date=row[5],
+                        created_at=row[6],
+                        updated_at=row[7],
                     )
             return None
 
@@ -199,17 +217,19 @@ class DatabaseClient:
                     page_id,
                     payment_method,
                     description,
+                    category,
                     amount,
                     date,
                     created_at,
                     updated_at
                 )
-                VALUES (?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     gasto.page_id,
                     gasto.payment_method,
                     gasto.description,
+                    gasto.category,
                     gasto.amount,
                     gasto.date,
                     gasto.created_at,
@@ -236,11 +256,12 @@ class DatabaseClient:
         async def _update() -> bool:
             cursor = await self.conn.execute(
                 """UPDATE gastos
-                SET payment_method = ?, description = ?, amount = ?,
+                SET payment_method = ?, description = ?, category = ?, amount = ?,
                 date = ?, updated_at = ? WHERE page_id = ?""",
                 (
                     gasto.payment_method,
                     gasto.description,
+                    gasto.category,
                     gasto.amount,
                     gasto.date,
                     gasto.updated_at,
@@ -360,10 +381,13 @@ class DatabaseClient:
             page_ids = [g.page_id for g in gastos]
             placeholders = ",".join("?" for _ in page_ids)
 
-            existing: dict[str, tuple[object, object, object, object, object]] = {}
+            existing: dict[
+                str, tuple[object, object, object, object, object, object]
+            ] = {}
             async with self.conn.execute(
                 f"""
-                SELECT page_id, payment_method, description, amount, date, updated_at
+                SELECT page_id, payment_method, description,
+                category, amount, date, updated_at
                 FROM gastos
                 WHERE page_id IN ({placeholders})
                 """,
@@ -371,7 +395,14 @@ class DatabaseClient:
             ) as cursor:
                 rows = await cursor.fetchall()
                 for row in rows:
-                    existing[str(row[0])] = (row[1], row[2], row[3], row[4], row[5])
+                    existing[str(row[0])] = (
+                        row[1],
+                        row[2],
+                        row[3],
+                        row[4],
+                        row[5],
+                        row[6],
+                    )
 
             created = 0
             updated = 0
@@ -386,9 +417,10 @@ class DatabaseClient:
                         if update_if_changed and (
                             row[0] == gasto.payment_method
                             and row[1] == gasto.description
-                            and row[2] == gasto.amount
-                            and row[3] == gasto.date
-                            and row[4] == gasto.updated_at
+                            and row[2] == gasto.category
+                            and row[3] == gasto.amount
+                            and row[4] == gasto.date
+                            and row[5] == gasto.updated_at
                         ):
                             skipped += 1
                             continue
@@ -396,11 +428,13 @@ class DatabaseClient:
                         try:
                             await self.conn.execute(
                                 """UPDATE gastos
-                                SET payment_method = ?, description = ?, amount = ?,
-                                date = ?, updated_at = ? WHERE page_id = ?""",
+                                SET payment_method = ?, description = ?,
+                                category = ?, amount = ?, date = ?,
+                                updated_at = ? WHERE page_id = ?""",
                                 (
                                     gasto.payment_method,
                                     gasto.description,
+                                    gasto.category,
                                     gasto.amount,
                                     gasto.date,
                                     gasto.updated_at,
@@ -421,17 +455,19 @@ class DatabaseClient:
                                     page_id,
                                     payment_method,
                                     description,
+                                    category,
                                     amount,
                                     date,
                                     created_at,
                                     updated_at
                                 )
-                                VALUES (?, ?, ?, ?, ?, ?, ?)
+                                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
                                 """,
                                 (
                                     gasto.page_id,
                                     gasto.payment_method,
                                     gasto.description,
+                                    gasto.category,
                                     gasto.amount,
                                     gasto.date,
                                     gasto.created_at,
@@ -470,7 +506,13 @@ class DatabaseClient:
 
         async def _list() -> list[Gasto]:
             async with self.conn.execute(
-                "SELECT * FROM gastos ORDER BY created_at DESC LIMIT ? OFFSET ?",
+                """
+                SELECT page_id, payment_method, description, category,
+                amount, date, created_at, updated_at
+                FROM gastos
+                ORDER BY created_at DESC
+                LIMIT ? OFFSET ?
+                """,
                 (limit, offset),
             ) as cursor:
                 rows = await cursor.fetchall()
@@ -479,10 +521,11 @@ class DatabaseClient:
                         page_id=row[0],
                         payment_method=row[1],
                         description=row[2],
-                        amount=row[3],
-                        date=row[4],
-                        created_at=row[5],
-                        updated_at=row[6],
+                        category=row[3],
+                        amount=row[4],
+                        date=row[5],
+                        created_at=row[6],
+                        updated_at=row[7],
                     )
                     for row in rows
                 ]

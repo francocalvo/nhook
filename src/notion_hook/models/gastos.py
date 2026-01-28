@@ -13,9 +13,10 @@ class Gasto(BaseModel):
 
     page_id: str = Field(..., description="Notion page ID (sync key)")
     payment_method: str | None = Field(None, description="Payment method")
-    description: str | None = Field(None, description="Description")
+    description: str | None = Field(None, description="Description (from Expense)")
+    category: str | None = Field(None, description="Category (comma-separated)")
     amount: float | None = Field(None, description="Amount")
-    date: str | None = Field(None, description="Date in ISO format")
+    date: str | None = Field(None, description="Date in YYYY-MM-DD format")
     created_at: str = Field(..., description="Creation timestamp (ISO format)")
     updated_at: str = Field(..., description="Last update timestamp (ISO format)")
 
@@ -50,7 +51,9 @@ class Gasto(BaseModel):
             select = prop.get("select") or {}
             if isinstance(select, dict) and isinstance(select.get("name"), str):
                 return select["name"]
+            return None
 
+        def _extract_multi_select(prop: dict[str, Any]) -> str | None:
             multi = prop.get("multi_select") or []
             if isinstance(multi, list):
                 names_out: list[str] = []
@@ -58,7 +61,6 @@ class Gasto(BaseModel):
                     if isinstance(item, dict) and isinstance(item.get("name"), str):
                         names_out.append(item["name"])
                 return ", ".join(names_out) if names_out else None
-
             return None
 
         def _extract_text(prop: dict[str, Any]) -> str | None:
@@ -91,7 +93,10 @@ class Gasto(BaseModel):
         def _extract_date_start(prop: dict[str, Any]) -> str | None:
             date_obj = prop.get("date")
             if isinstance(date_obj, dict) and isinstance(date_obj.get("start"), str):
-                return date_obj["start"]
+                start = date_obj["start"]
+                if "T" in start:
+                    return start.split("T", 1)[0]
+                return start
             return None
 
         payment_method = None
@@ -99,8 +104,12 @@ class Gasto(BaseModel):
             payment_method = _extract_select_name(pm_prop)
 
         description = None
-        if desc_prop := _first_property("Description", "description"):
+        if desc_prop := _first_property("Expense", "expense"):
             description = _extract_text(desc_prop)
+
+        category = None
+        if cat_prop := _first_property("Category", "category"):
+            category = _extract_multi_select(cat_prop)
 
         amount = None
         if amount_prop := _first_property("Amount", "amount"):
@@ -114,6 +123,7 @@ class Gasto(BaseModel):
             page_id=page_id,
             payment_method=payment_method,
             description=description,
+            category=category,
             amount=amount,
             date=date,
             created_at=created_time,

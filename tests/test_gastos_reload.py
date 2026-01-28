@@ -73,6 +73,7 @@ def make_notion_gastos_page(
     page_id: str = "test-page-1",
     payment_method: str = "Cash",
     description: str = "Test expense",
+    category: str | None = None,
     amount: float = 100.0,
     date: str = "2024-01-01",
 ) -> dict:
@@ -82,30 +83,47 @@ def make_notion_gastos_page(
         page_id: The Notion page ID.
         payment_method: Payment method.
         description: Description.
+        category: Category (single or comma-separated).
         amount: Amount.
         date: Date string.
 
     Returns:
         Dictionary representing a Notion page.
     """
+    properties = {
+        "Payment Method": {
+            "id": "pm-id",
+            "type": "select",
+            "select": {"id": "opt-1", "name": payment_method, "color": "default"},
+        },
+        "Expense": {
+            "id": "desc-id",
+            "type": "rich_text",
+            "rich_text": [{"type": "text", "text": {"content": description}}],
+        },
+        "Amount": {"id": "amt-id", "type": "number", "number": amount},
+        "Date": {"id": "date-id", "type": "date", "date": {"start": date}},
+    }
+
+    if category is not None:
+        if ", " in category:
+            categories = [
+                {"id": f"opt-{i}", "name": cat}
+                for i, cat in enumerate(category.split(", "))
+            ]
+        else:
+            categories = [{"id": "opt-1", "name": category}]
+        properties["Category"] = {
+            "id": "cat-id",
+            "type": "multi_select",
+            "multi_select": categories,
+        }
+
     return {
         "id": page_id,
         "created_time": "2024-01-01T00:00:00.000Z",
         "last_edited_time": "2024-01-01T00:00:00.000Z",
-        "properties": {
-            "Payment Method": {
-                "id": "pm-id",
-                "type": "select",
-                "select": {"id": "opt-1", "name": payment_method, "color": "default"},
-            },
-            "Description": {
-                "id": "desc-id",
-                "type": "rich_text",
-                "rich_text": [{"type": "text", "text": {"content": description}}],
-            },
-            "Amount": {"id": "amt-id", "type": "number", "number": amount},
-            "Date": {"id": "date-id", "type": "date", "date": {"start": date}},
-        },
+        "properties": properties,
     }
 
 
@@ -268,6 +286,7 @@ class TestGastosReloadService:
             page_id="page-1",
             payment_method="Cash",
             description="Old description",
+            category="Food",
             amount=50.0,
             date="2024-01-01",
             created_at="2024-01-01T00:00:00Z",
@@ -281,6 +300,7 @@ class TestGastosReloadService:
                     page_id="page-1",
                     payment_method="Credit",
                     description="New description",
+                    category="Groceries",
                     amount=150.0,
                     date="2024-01-01",
                 ),
@@ -303,6 +323,7 @@ class TestGastosReloadService:
         assert updated is not None
         assert updated.payment_method == "Credit"
         assert updated.description == "New description"
+        assert updated.category == "Groceries"
         assert updated.amount == 150.0
 
     @pytest.mark.asyncio
@@ -317,6 +338,7 @@ class TestGastosReloadService:
             page_id="page-old",
             payment_method="Cash",
             description="Old expense",
+            category="Food",
             amount=50.0,
             date="2024-01-01",
             created_at="2024-01-01T00:00:00Z",
@@ -394,3 +416,67 @@ class TestGastosReloadService:
         assert reload_service.get_job(job1_id) is None
         assert reload_service.get_job(job2_id) is not None
         assert reload_service.get_job(job3_id) is not None
+
+    @pytest.mark.asyncio
+    async def test_category_single_value(
+        self,
+        reload_service: GastosReloadService,
+        mock_notion_client: AsyncMock,
+    ) -> None:
+        """Test reload with single category value."""
+        mock_notion_client.query_all_gastos = AsyncMock(
+            return_value=[
+                make_notion_gastos_page(
+                    page_id="page-1",
+                    payment_method="Cash",
+                    description="Lunch",
+                    category="Food",
+                    amount=15.0,
+                    date="2024-01-01",
+                ),
+            ]
+        )
+
+        job_id = await reload_service.create_job(mode=ReloadMode.FULL)
+        await reload_service._execute_job(job_id)
+
+        job = reload_service.get_job(job_id)
+        assert job is not None
+        assert job.status == JobStatus.COMPLETED
+        assert job.progress.created == 1
+
+        gasto = await reload_service.database_client.get_gasto("page-1")
+        assert gasto is not None
+        assert gasto.category == "Food"
+
+    @pytest.mark.asyncio
+    async def test_category_multiple_values(
+        self,
+        reload_service: GastosReloadService,
+        mock_notion_client: AsyncMock,
+    ) -> None:
+        """Test reload with multiple category values (comma-separated)."""
+        mock_notion_client.query_all_gastos = AsyncMock(
+            return_value=[
+                make_notion_gastos_page(
+                    page_id="page-1",
+                    payment_method="Cash",
+                    description="Grocery shopping",
+                    category="Food, Groceries, Household",
+                    amount=150.0,
+                    date="2024-01-01",
+                ),
+            ]
+        )
+
+        job_id = await reload_service.create_job(mode=ReloadMode.FULL)
+        await reload_service._execute_job(job_id)
+
+        job = reload_service.get_job(job_id)
+        assert job is not None
+        assert job.status == JobStatus.COMPLETED
+        assert job.progress.created == 1
+
+        gasto = await reload_service.database_client.get_gasto("page-1")
+        assert gasto is not None
+        assert gasto.category == "Food, Groceries, Household"

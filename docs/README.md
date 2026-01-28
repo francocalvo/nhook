@@ -22,6 +22,7 @@ curl http://localhost:8000/health
 ## Documentation
 
 - **[Architecture](./architecture.md)** - System design, components, and request flow
+- **[Gastos Feature](./gastos.md)** - Local storage and reload API for Gastos entries
 - **[Testing](./testing.md)** - Running tests, fixtures, and writing new tests
 - **[Extending](./extending.md)** - Adding new workflows and features
 - **[Deployment](./deployment.md)** - Making the server publicly accessible for Notion webhooks

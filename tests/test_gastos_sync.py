@@ -102,10 +102,15 @@ class TestGastosSyncWorkflow:
                     "type": "select",
                     "select": {"id": "opt-1", "name": "Cash"},
                 },
-                "Description": {
+                "Expense": {
                     "id": "desc-id",
                     "type": "title",
                     "title": [{"text": {"content": "Test expense"}}],
+                },
+                "Category": {
+                    "id": "cat-id",
+                    "type": "multi_select",
+                    "multi_select": [{"id": "opt-1", "name": "Food"}],
                 },
                 "Amount": {
                     "id": "amount-id",
@@ -136,6 +141,7 @@ class TestGastosSyncWorkflow:
         assert created_gasto.page_id == "test-page-1"
         assert created_gasto.payment_method == "Cash"
         assert created_gasto.description == "Test expense"
+        assert created_gasto.category == "Food"
         assert created_gasto.amount == 100.0
 
     @pytest.mark.asyncio
@@ -158,6 +164,7 @@ class TestGastosSyncWorkflow:
             page_id="test-page-2",
             payment_method="Cash",
             description="Test",
+            category="Food",
             amount=100.0,
             date="2024-01-01",
             created_at="2024-01-01T00:00:00Z",
@@ -230,6 +237,7 @@ class TestGastosSyncWorkflow:
         created_gasto = mock_db_client.create_gasto.call_args[0][0]
         assert created_gasto.payment_method is None
         assert created_gasto.description is None
+        assert created_gasto.category is None
         assert created_gasto.amount is None
         assert created_gasto.date is None
 
@@ -268,3 +276,93 @@ class TestGastosSyncWorkflow:
         created_gasto = mock_db_client.create_gasto.call_args[0][0]
         assert created_gasto.payment_method == "Credit Card"
         assert created_gasto.amount == 150.0
+
+    @pytest.mark.asyncio
+    async def test_category_single_value(
+        self, mock_notion_client: AsyncMock, mock_db_client: AsyncMock
+    ) -> None:
+        """Test category extraction with single value."""
+        workflow = GastosSyncWorkflow(mock_notion_client, mock_db_client)
+        payload = make_notion_webhook_payload(
+            page_id="test-page-6",
+            extra_properties={
+                "Category": {
+                    "id": "cat-id",
+                    "type": "multi_select",
+                    "multi_select": [{"id": "opt-1", "name": "Groceries"}],
+                },
+            },
+        )
+        mock_db_client.get_gasto.return_value = None
+
+        context = WorkflowContext(
+            page_id="test-page-6",
+            payload=payload,
+            workflow_name="gastos-sync",
+        )
+
+        result = await workflow.execute(context)
+
+        assert result["operation"] == "create"
+        created_gasto = mock_db_client.create_gasto.call_args[0][0]
+        assert created_gasto.category == "Groceries"
+
+    @pytest.mark.asyncio
+    async def test_category_multiple_values(
+        self, mock_notion_client: AsyncMock, mock_db_client: AsyncMock
+    ) -> None:
+        """Test category extraction with multiple values (comma-separated)."""
+        workflow = GastosSyncWorkflow(mock_notion_client, mock_db_client)
+        payload = make_notion_webhook_payload(
+            page_id="test-page-7",
+            extra_properties={
+                "Category": {
+                    "id": "cat-id",
+                    "type": "multi_select",
+                    "multi_select": [
+                        {"id": "opt-1", "name": "Food"},
+                        {"id": "opt-2", "name": "Groceries"},
+                        {"id": "opt-3", "name": "Dining"},
+                    ],
+                },
+            },
+        )
+        mock_db_client.get_gasto.return_value = None
+
+        context = WorkflowContext(
+            page_id="test-page-7",
+            payload=payload,
+            workflow_name="gastos-sync",
+        )
+
+        result = await workflow.execute(context)
+
+        assert result["operation"] == "create"
+        created_gasto = mock_db_client.create_gasto.call_args[0][0]
+        assert created_gasto.category == "Food, Groceries, Dining"
+
+    @pytest.mark.asyncio
+    async def test_category_missing(
+        self, mock_notion_client: AsyncMock, mock_db_client: AsyncMock
+    ) -> None:
+        """Test category extraction when property is missing."""
+        workflow = GastosSyncWorkflow(mock_notion_client, mock_db_client)
+        payload = make_notion_webhook_payload(
+            page_id="test-page-8",
+            extra_properties={
+                "Amount": {"id": "amount-id", "type": "number", "number": 50.0},
+            },
+        )
+        mock_db_client.get_gasto.return_value = None
+
+        context = WorkflowContext(
+            page_id="test-page-8",
+            payload=payload,
+            workflow_name="gastos-sync",
+        )
+
+        result = await workflow.execute(context)
+
+        assert result["operation"] == "create"
+        created_gasto = mock_db_client.create_gasto.call_args[0][0]
+        assert created_gasto.category is None

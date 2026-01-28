@@ -18,6 +18,7 @@ pkgs.mkShell {
     pkgs.ruff
     pkgs.pyright
     pkgs.ngrok
+    pkgs.sqlite
   ]
   ++ uvSet.dependencies;
 

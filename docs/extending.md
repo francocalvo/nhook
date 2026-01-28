@@ -267,14 +267,91 @@ if settings.enable_my_workflow:
 
 Workflows are matched in registration order. The first workflow where `matches()` returns `True` is executed.
 
-To control priority, register workflows in the desired order:
+To control priority, register workflows in desired order:
 
 ```python
 # Higher priority workflows first
 _workflow_registry.register(HighPriorityWorkflow)
 _workflow_registry.register(CronogramaSyncWorkflow)
+_workflow_registry.register(GastosSyncWorkflow)
 _workflow_registry.register(CatchAllWorkflow)  # Matches everything
 ```
+
+## Example: Database-Backed Workflow
+
+For workflows that need local storage (like gastos-sync), you can integrate with the database:
+
+```python
+# src/notion_hook/workflows/my_db_workflow.py
+from __future__ import annotations
+
+from typing import TYPE_CHECKING, Any
+
+from notion_hook.core.database import DatabaseClient
+from notion_hook.core.exceptions import WorkflowError
+from notion_hook.core.logging import get_logger
+from notion_hook.workflows.base import BaseWorkflow
+
+if TYPE_CHECKING:
+    from notion_hook.models.webhook import WorkflowContext
+
+logger = get_logger("workflows.my_db_workflow")
+
+
+class MyDbWorkflow(BaseWorkflow):
+    """Workflow that syncs data to local database."""
+
+    name = "my_db_workflow"
+    description = "Sync data to local SQLite database"
+
+    def __init__(self, notion_client: Any, database_client: DatabaseClient) -> None:
+        """Initialize with database client."""
+        super().__init__(notion_client)
+        self.database_client = database_client
+
+    def matches(self, context: WorkflowContext) -> bool:
+        """Match on workflow name header."""
+        return context.workflow_name == self.name
+
+    async def execute(self, context: WorkflowContext) -> dict[str, Any]:
+        """Execute workflow with database operations."""
+        try:
+            # Parse data from Notion
+            # ...
+
+            # Perform database operation with retry
+            await self.database_client.create_my_record(record)
+
+            return {"operation": "create", "success": True}
+
+        except Exception as e:
+            logger.error(f"Workflow failed: {e}")
+            raise WorkflowError(f"{self.name} failed: {e}") from e
+```
+
+Register with database client in `app.py`:
+
+```python
+# src/notion_hook/app.py
+from notion_hook.workflows.my_db_workflow import MyDbWorkflow
+
+@asynccontextmanager
+async def lifespan(app: FastAPI) -> AsyncIterator[None]:
+    # ... existing setup ...
+
+    _database_client = DatabaseClient(settings)
+    await _database_client.__aenter__()
+
+    _workflow_registry = WorkflowRegistry(_notion_client)
+    _workflow_registry.register(CronogramaSyncWorkflow)
+    _workflow_registry.register(MyDbWorkflow)  # Pass database_client
+
+    yield
+
+    await _database_client.__aexit__(...)
+```
+
+See **[Gastos Feature](./gastos.md)** for a complete example of database-backed workflow.
 
 ## Best Practices
 

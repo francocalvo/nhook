@@ -1,16 +1,56 @@
 from __future__ import annotations
 
-from datetime import date
+from datetime import date, datetime
 from typing import Any
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 
 class DateValue(BaseModel):
-    """Notion date property value (the nested date field)."""
+    """Notion date property value (the nested date field).
+
+    Accepts both date (YYYY-MM-DD) and datetime (YYYY-MM-DDTHH:MM:SSZ) strings.
+    DateTime values are normalized to date objects for matching.
+    """
 
     start: date
     end: date | None = None
+
+    @field_validator("start", "end", mode="before")
+    @classmethod
+    def parse_date_string(cls, v: Any) -> date | None:
+        """Parse date or datetime string to date object.
+
+        Args:
+            v: Value to parse (date, datetime, or string).
+
+        Returns:
+            Date object or None.
+
+        Raises:
+            ValueError: If parsing fails.
+        """
+        if v is None:
+            return None
+
+        if isinstance(v, date):
+            return v
+
+        if isinstance(v, str):
+            # Try parsing as datetime first (handles ISO-8601 with time)
+            try:
+                dt = datetime.fromisoformat(v.replace("Z", "+00:00"))
+                return dt.date()
+            except ValueError:
+                pass
+
+            # Try parsing as date only
+            try:
+                return date.fromisoformat(v)
+            except ValueError:
+                raise ValueError(f"Unable to parse date string: {v}")
+
+        raise ValueError(f"Invalid date value type: {type(v)}")
 
 
 class NotionDateProperty(BaseModel):

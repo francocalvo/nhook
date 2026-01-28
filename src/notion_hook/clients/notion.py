@@ -14,6 +14,17 @@ logger = get_logger("clients.notion")
 NOTION_API_BASE = "https://api.notion.com/v1"
 
 
+class PropertyNames:
+    """Canonical property names for Notion databases.
+
+    These constants define the exact property names expected in Notion databases.
+    All Notion API calls must use these exact names as Notion's API is case-sensitive.
+    """
+
+    CRONOGRAMA_DAY = "Día"
+    CRONOGRAMA = "Cronograma"
+
+
 class NotionClient:
     """Async client for Notion API operations."""
 
@@ -163,7 +174,7 @@ class NotionClient:
         logger.debug(f"Finding Cronograma entries for dates: {date_strings}")
 
         filter_conditions = [
-            {"property": "Día", "title": {"equals": date_str}}
+            {"property": PropertyNames.CRONOGRAMA_DAY, "title": {"equals": date_str}}
             for date_str in date_strings
         ]
 
@@ -195,7 +206,7 @@ class NotionClient:
         relation_value = [{"id": pid} for pid in cronograma_page_ids]
 
         properties = {
-            "Cronograma": {"relation": relation_value},
+            PropertyNames.CRONOGRAMA: {"relation": relation_value},
         }
 
         num_relations = len(cronograma_page_ids)
@@ -217,7 +228,7 @@ class NotionClient:
         relation_value = [{"id": pid} for pid in cronograma_page_ids]
 
         properties = {
-            "Cronograma": {"relation": relation_value},
+            PropertyNames.CRONOGRAMA: {"relation": relation_value},
         }
 
         num_relations = len(cronograma_page_ids)

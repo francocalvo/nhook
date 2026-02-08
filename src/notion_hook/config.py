@@ -24,6 +24,8 @@ class Settings(BaseSettings):
 
     # Notion API
     notion_api_token: str
+    atracciones_database_id: str
+    ciudades_database_id: str
     cronograma_database_id: str
     gastos_database_id: str
     pasajes_database_id: str

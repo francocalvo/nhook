@@ -48,6 +48,8 @@ class DatabaseClient:
         async with self._lock:
             if self._conn is None:
                 self._conn = await aiosqlite.connect(self.settings.database_path)
+                # Enable foreign key constraints (required for FK relationships)
+                await self.conn.execute("PRAGMA foreign_keys = ON")
                 await self._create_tables()
                 logger.info(f"Database initialized: {self.settings.database_path}")
 

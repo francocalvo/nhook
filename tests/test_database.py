@@ -251,3 +251,111 @@ class TestDatabaseClient:
         """Test getting a gasto that doesn't exist."""
         gasto = await db_client.get_gasto("nonexistent")
         assert gasto is None
+
+    @pytest.mark.asyncio
+    async def test_foreign_keys_pragma_enabled(self, db_client: DatabaseClient) -> None:
+        """Test that foreign key constraints are enabled."""
+        # Query the foreign_keys pragma to verify it's enabled
+        async with db_client.conn.execute("PRAGMA foreign_keys") as cursor:
+            row = await cursor.fetchone()
+            assert row is not None
+            # SQLite returns 1 for ON, 0 for OFF
+            assert row[0] == 1
+
+    @pytest.mark.asyncio
+    async def test_foreign_key_constraint_enforcement(
+        self, db_client: DatabaseClient
+    ) -> None:
+        """Test that foreign key constraints are enforced."""
+        # Create a parent table (simulating ciudades)
+        await db_client.conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS test_parent (
+                page_id TEXT PRIMARY KEY,
+                nombre TEXT,
+                created_at TIMESTAMP NOT NULL,
+                updated_at TIMESTAMP NOT NULL
+            )
+        """
+        )
+        # Create a child table with FK constraint (simulating atracciones)
+        await db_client.conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS test_child (
+                page_id TEXT PRIMARY KEY,
+                parent_page_id TEXT REFERENCES test_parent(page_id),
+                created_at TIMESTAMP NOT NULL,
+                updated_at TIMESTAMP NOT NULL
+            )
+        """
+        )
+        await db_client.conn.commit()
+
+        # Insert a valid parent record
+        await db_client.conn.execute(
+            """
+            INSERT INTO test_parent
+            (page_id, nombre, created_at, updated_at)
+            VALUES (?, ?, ?, ?)
+            """,
+            (
+                "parent-1",
+                "Parent One",
+                "2024-01-01T00:00:00Z",
+                "2024-01-01T00:00:00Z",
+            ),
+        )
+        await db_client.conn.commit()
+
+        # Insert a child with valid parent reference - should succeed
+        await db_client.conn.execute(
+            """
+            INSERT INTO test_child
+            (page_id, parent_page_id, created_at, updated_at)
+            VALUES (?, ?, ?, ?)
+            """,
+            (
+                "child-1",
+                "parent-1",
+                "2024-01-01T00:00:00Z",
+                "2024-01-01T00:00:00Z",
+            ),
+        )
+        await db_client.conn.commit()
+
+        # Verify child was inserted
+        async with db_client.conn.execute("SELECT COUNT(*) FROM test_child") as cursor:
+            row = await cursor.fetchone()
+            assert row[0] == 1
+
+        # Try to insert child with invalid parent reference
+        # should fail with FK constraint error
+        with pytest.raises(Exception) as exc_info:
+            await db_client.conn.execute(
+                """
+                INSERT INTO test_child
+                (page_id, parent_page_id, created_at, updated_at)
+                VALUES (?, ?, ?, ?)
+                """,
+                (
+                    "child-2",
+                    "nonexistent-parent",
+                    "2024-01-01T00:00:00Z",
+                    "2024-01-01T00:00:00Z",
+                ),
+            )
+            await db_client.conn.commit()
+
+        # Verify error contains "FOREIGN KEY constraint failed"
+        error_str = str(exc_info.value)
+        assert "FOREIGN KEY" in error_str or "foreign key" in error_str
+
+        # Verify child was NOT inserted
+        async with db_client.conn.execute("SELECT COUNT(*) FROM test_child") as cursor:
+            row = await cursor.fetchone()
+            assert row[0] == 1  # Only the valid child exists
+
+        # Cleanup test tables
+        await db_client.conn.execute("DROP TABLE IF EXISTS test_child")
+        await db_client.conn.execute("DROP TABLE IF EXISTS test_parent")
+        await db_client.conn.commit()

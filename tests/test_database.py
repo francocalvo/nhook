@@ -4,6 +4,7 @@ import os
 import tempfile
 from collections.abc import Generator
 
+import aiosqlite
 import pytest
 
 os.environ["WEBHOOK_SECRET_KEY"] = "test-secret-key"
@@ -330,7 +331,7 @@ class TestDatabaseClient:
 
         # Try to insert child with invalid parent reference
         # should fail with FK constraint error
-        with pytest.raises(Exception) as exc_info:
+        with pytest.raises(aiosqlite.IntegrityError) as exc_info:
             await db_client.conn.execute(
                 """
                 INSERT INTO test_child
@@ -344,7 +345,6 @@ class TestDatabaseClient:
                     "2024-01-01T00:00:00Z",
                 ),
             )
-            await db_client.conn.commit()
 
         # Verify error contains "FOREIGN KEY constraint failed"
         error_str = str(exc_info.value)

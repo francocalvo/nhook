@@ -17,6 +17,9 @@ class Gasto(BaseModel):
     category: str | None = Field(None, description="Category (comma-separated)")
     amount: float | None = Field(None, description="Amount")
     date: str | None = Field(None, description="Date in YYYY-MM-DD format")
+    persona: str | None = Field(
+        None, description="Persona (comma-separated if multi-select)"
+    )
     created_at: str = Field(..., description="Creation timestamp (ISO format)")
     updated_at: str = Field(..., description="Last update timestamp (ISO format)")
 
@@ -121,6 +124,12 @@ class Gasto(BaseModel):
         if date_prop := _first_property("Date", "date"):
             date = _extract_date_start(date_prop)
 
+        persona = None
+        if persona_prop := _first_property("Persona", "persona"):
+            persona = _extract_multi_select(persona_prop)
+            if persona is None:
+                persona = _extract_select_name(persona_prop)
+
         return cls(
             page_id=page_id,
             payment_method=payment_method,
@@ -128,6 +137,7 @@ class Gasto(BaseModel):
             category=category,
             amount=amount,
             date=date,
+            persona=persona,
             created_at=created_time,
             updated_at=last_edited_time,
         )

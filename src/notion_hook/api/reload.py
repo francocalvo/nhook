@@ -15,7 +15,7 @@ from notion_hook.services.gastos_reload import (
 
 logger = get_logger("api.reload")
 
-router = APIRouter(tags=["reload"], prefix="/api/gastos")
+router = APIRouter(tags=["gastos"], prefix="/api/gastos")
 
 
 def get_reload_service() -> GastosReloadService:

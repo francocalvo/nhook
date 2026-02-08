@@ -115,6 +115,8 @@ class DatabaseClient:
 
         if "category" not in existing:
             await self.conn.execute("ALTER TABLE gastos ADD COLUMN category TEXT")
+        if "persona" not in existing:
+            await self.conn.execute("ALTER TABLE gastos ADD COLUMN persona TEXT")
 
     async def get_gasto(self, page_id: str) -> Gasto | None:
         """Retrieve a single gasto by page_id.
@@ -133,7 +135,7 @@ class DatabaseClient:
             async with self.conn.execute(
                 """
                 SELECT page_id, payment_method, description, category,
-                amount, date, created_at, updated_at
+                amount, date, created_at, updated_at, persona
                 FROM gastos
                 WHERE page_id = ?
                 """,
@@ -150,6 +152,7 @@ class DatabaseClient:
                         date=row[5],
                         created_at=row[6],
                         updated_at=row[7],
+                        persona=row[8],
                     )
             return None
 
@@ -508,7 +511,7 @@ class DatabaseClient:
             async with self.conn.execute(
                 """
                 SELECT page_id, payment_method, description, category,
-                amount, date, created_at, updated_at
+                amount, date, created_at, updated_at, persona
                 FROM gastos
                 ORDER BY created_at DESC
                 LIMIT ? OFFSET ?
@@ -526,11 +529,156 @@ class DatabaseClient:
                         date=row[5],
                         created_at=row[6],
                         updated_at=row[7],
+                        persona=row[8],
                     )
                     for row in rows
                 ]
 
         return await self._retry_operation("list", _list)
+
+    async def _build_fts_query(self, query: str) -> str:
+        """Build FTS5 query string with proper escaping.
+
+        Args:
+            query: The search query string.
+
+        Returns:
+            Properly escaped FTS query.
+        """
+        # Simple escaping - quote terms with spaces
+        parts = []
+        for term in query.split():
+            if " " in term:
+                # Phrase search - already quoted
+                parts.append(term)
+            else:
+                # Prefix search
+                parts.append(f"{term}*")
+        return " ".join(parts)
+
+    async def search_gastos(
+        self,
+        q: str | None = None,
+        date_from: str | None = None,
+        date_to: str | None = None,
+        persona: str | None = None,
+        payment_method: str | None = None,
+        category: str | None = None,
+        amount_min: float | None = None,
+        amount_max: float | None = None,
+        sort_by: str = "created_at",
+        order: str = "desc",
+        limit: int = 100,
+        offset: int = 0,
+    ) -> list[Gasto]:
+        """Search gastos with filters and full-text search.
+
+        Args:
+            q: Full-text search query (uses FTS when provided).
+            date_from: Inclusive start date (YYYY-MM-DD).
+            date_to: Inclusive end date (YYYY-MM-DD).
+            persona: Filter by exact persona value.
+            payment_method: Filter by exact payment method.
+            category: Filter by category (contains).
+            amount_min: Minimum amount.
+            amount_max: Maximum amount.
+            sort_by: Field to sort by (date, created_at, amount).
+            order: Sort order (asc, desc).
+            limit: Maximum number of results.
+            offset: Number of results to skip.
+
+        Returns:
+            List of matching Gasto instances.
+
+        Raises:
+            DatabaseError: If the operation fails after retries.
+        """
+
+        async def _search() -> list[Gasto]:
+            # Build WHERE clause and parameters
+            where_clauses: list[str] = []
+            params: list[str | float | None] = []
+            param_index = 1
+
+            # Use FTS for full-text search
+            if q:
+                fts_query = await self._build_fts_query(q)
+                where_clauses.append(
+                    "gastos.rowid IN "
+                    "(SELECT rowid FROM gastos_fts "
+                    "WHERE gastos_fts MATCH ?)"
+                )
+                params.append(fts_query)
+            else:
+                # Regular filters when not using FTS
+                if date_from:
+                    where_clauses.append(f"date >= ?{param_index}")
+                    params.append(date_from)
+                    param_index += 1
+                if date_to:
+                    where_clauses.append(f"date <= ?{param_index}")
+                    params.append(date_to)
+                    param_index += 1
+                if persona:
+                    where_clauses.append(f"persona = ?{param_index}")
+                    params.append(persona)
+                    param_index += 1
+                if payment_method:
+                    where_clauses.append(f"payment_method = ?{param_index}")
+                    params.append(payment_method)
+                    param_index += 1
+                if category:
+                    where_clauses.append(f"category LIKE ?{param_index}")
+                    params.append(f"%{category}%")
+                    param_index += 1
+                if amount_min:
+                    where_clauses.append(f"amount >= ?{param_index}")
+                    params.append(amount_min)
+                    param_index += 1
+                if amount_max:
+                    where_clauses.append(f"amount <= ?{param_index}")
+                    params.append(amount_max)
+                    param_index += 1
+
+            # Validate sort_by
+            valid_sort_fields = {"date", "created_at", "amount"}
+            sort_field = sort_by if sort_by in valid_sort_fields else "created_at"
+            if sort_field != sort_by:
+                logger.warning(f"Invalid sort_by '{sort_by}', using 'created_at'")
+
+            # Validate order
+            order_upper = order.upper()
+            order_sql = "DESC" if order_upper not in ("ASC", "DESC") else order_upper
+            if order_upper != order_upper:
+                logger.warning(f"Invalid order '{order}', using 'DESC'")
+
+            # Build SQL query
+            where_sql = " AND ".join(where_clauses) if where_clauses else "1=1"
+            order_final = f"ORDER BY {sort_field} {order_sql}"
+
+            async with self.conn.execute(
+                f"SELECT page_id, payment_method, description, category, "
+                f"amount, date, created_at, updated_at, persona "
+                f"FROM gastos WHERE {where_sql} {order_final} LIMIT ? OFFSET ?",
+                (*params, limit, offset),
+            ) as cursor:
+                rows = await cursor.fetchall()
+                return [
+                    Gasto(
+                        page_id=row[0],
+                        payment_method=row[1],
+                        description=row[2],
+                        category=row[3],
+                        amount=row[4],
+                        date=row[5],
+                        created_at=row[6],
+                        updated_at=row[7],
+                        persona=row[8],
+                    )
+                    for row in rows
+                ]
+
+        return await self._retry_operation("search", _search)
 
     async def get_all_gastos_page_ids(self) -> set[str]:
         """Get all Gastos page IDs from the database.

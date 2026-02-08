@@ -316,3 +316,89 @@ class NotionClient:
 
         logger.info(f"Finished querying Gastos: {len(all_results)} total records")
         return all_results
+
+    async def create_gasto_page(
+        self,
+        expense: str,
+        amount: float,
+        date: str | None = None,
+        category: list[str] | str | None = None,
+        payment_method: str | None = None,
+        persona: list[str] | str | None = None,
+    ) -> dict[str, Any]:
+        """Create a new Gastos page in Notion.
+
+        Args:
+            expense: The expense/description text.
+            amount: The amount value.
+            date: Date string in YYYY-MM-DD format.
+            category: Category value(s) - list for multi-select, string for select.
+            payment_method: Payment method value.
+            persona: Persona value(s) - list for multi-select, string for select.
+
+        Returns:
+            The created page data.
+
+        Raises:
+            NotionClientError: If the request fails.
+        """
+        properties: dict[str, Any] = {
+            "Expense": {
+                "type": "title",
+                "title": [{"text": {"content": expense}}],
+            },
+            "Amount": {"type": "number", "number": amount},
+        }
+
+        if date:
+            properties["Date"] = {"type": "date", "date": {"start": date}}
+
+        if category:
+            if isinstance(category, list):
+                properties["Category"] = {
+                    "type": "multi_select",
+                    "multi_select": [{"name": c} for c in category],
+                }
+            else:
+                # String for select
+                properties["Category"] = {
+                    "type": "select",
+                    "select": {"name": category},
+                }
+
+        if payment_method:
+            properties["Payment Method"] = {
+                "type": "select",
+                "select": {"name": payment_method},
+            }
+
+        if persona:
+            if isinstance(persona, list):
+                properties["Persona"] = {
+                    "type": "multi_select",
+                    "multi_select": [{"name": p} for p in persona],
+                }
+            else:
+                # String for select
+                properties["Persona"] = {"type": "select", "select": {"name": persona}}
+
+        response = await self.client.post(
+            "/pages",
+            json={
+                "parent": {"database_id": self.settings.gastos_database_id},
+                "properties": properties,
+            },
+        )
+
+        if response.status_code != 200:
+            raise NotionClientError(
+                f"Failed to create Gastos page: {response.text}",
+                status_code=response.status_code,
+            )
+
+        result = response.json()
+        logger.info(
+            f"Created Gastos page with expense='{expense}', "
+            f"amount={amount}, page_id='{result.get('id', 'unknown')}'"
+        )
+        return result

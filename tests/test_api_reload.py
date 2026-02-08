@@ -27,6 +27,8 @@ def settings() -> Settings:
     return Settings(
         webhook_secret_key="test-secret-key",
         notion_api_token="secret_test_token",
+        atracciones_database_id="test-atracciones-db-id",
+        ciudades_database_id="test-ciudades-db-id",
         cronograma_database_id="test-cronograma-db-id",
         gastos_database_id="test-gastos-db-id",
         pasajes_database_id="test-pasajes-db-id",

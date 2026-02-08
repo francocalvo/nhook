@@ -8,6 +8,8 @@ import pytest
 
 os.environ["WEBHOOK_SECRET_KEY"] = "test-secret-key"
 os.environ["NOTION_API_TOKEN"] = "secret_test_token"
+os.environ["ATRACCIONES_DATABASE_ID"] = "test-atracciones-db-id"
+os.environ["CIUDADES_DATABASE_ID"] = "test-ciudades-db-id"
 os.environ["CRONOGRAMA_DATABASE_ID"] = "test-cronograma-db-id"
 os.environ["GASTOS_DATABASE_ID"] = "test-gastos-db-id"
 os.environ["PASAJES_DATABASE_ID"] = "test-pasajes-db-id"
@@ -32,6 +34,8 @@ def settings() -> Generator[Settings, None, None]:
     yield Settings(
         webhook_secret_key="test-secret-key",
         notion_api_token="secret_test_token",
+        atracciones_database_id="test-atracciones-db-id",
+        ciudades_database_id="test-ciudades-db-id",
         cronograma_database_id="test-cronograma-db-id",
         gastos_database_id="test-gastos-db-id",
         pasajes_database_id="test-pasajes-db-id",

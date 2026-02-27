@@ -14,9 +14,14 @@ from notion_hook.core.database import DatabaseClient
 from notion_hook.core.logging import setup_logging
 from notion_hook.core.middleware import LoggingMiddleware
 from notion_hook.services.gastos_reload import GastosReloadService
+from notion_hook.services.notion_reload import NotionReloadService
+from notion_hook.workflows.atracciones_db_sync import AtraccionesDbSyncWorkflow
 from notion_hook.workflows.atracciones_sync import AtraccionesSyncWorkflow
+from notion_hook.workflows.ciudades_sync import CiudadesSyncWorkflow
+from notion_hook.workflows.cronograma_db_sync import CronogramaDbSyncWorkflow
 from notion_hook.workflows.cronograma_sync import CronogramaSyncWorkflow
 from notion_hook.workflows.gastos_sync import GastosSyncWorkflow
+from notion_hook.workflows.pasajes_db_sync import PasajesDbSyncWorkflow
 from notion_hook.workflows.pasajes_sync import PasajesSyncWorkflow
 from notion_hook.workflows.registry import WorkflowRegistry
 
@@ -27,6 +32,7 @@ _workflow_registry: WorkflowRegistry | None = None
 _notion_client: NotionClient | None = None
 _database_client: DatabaseClient | None = None
 _reload_service: GastosReloadService | None = None
+_full_reload_service: NotionReloadService | None = None
 
 
 @asynccontextmanager
@@ -37,6 +43,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     and cleans up on shutdown.
     """
     global _workflow_registry, _notion_client, _database_client, _reload_service
+    global _full_reload_service
 
     settings = get_settings()
     logger = setup_logging(settings.debug)
@@ -47,6 +54,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     created_database_client = False
     created_registry = False
     created_reload_service = False
+    created_full_reload_service = False
 
     if _notion_client is None:
         _notion_client = NotionClient(settings)
@@ -60,6 +68,10 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
 
     if _workflow_registry is None:
         _workflow_registry = WorkflowRegistry(_notion_client, _database_client)
+        _workflow_registry.register(CiudadesSyncWorkflow)
+        _workflow_registry.register(CronogramaDbSyncWorkflow)
+        _workflow_registry.register(PasajesDbSyncWorkflow)
+        _workflow_registry.register(AtraccionesDbSyncWorkflow)
         _workflow_registry.register(CronogramaSyncWorkflow)
         _workflow_registry.register(PasajesSyncWorkflow)
         _workflow_registry.register(GastosSyncWorkflow)
@@ -69,6 +81,10 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     if _reload_service is None:
         _reload_service = GastosReloadService(_notion_client, _database_client)
         created_reload_service = True
+
+    if _full_reload_service is None:
+        _full_reload_service = NotionReloadService(_notion_client, _database_client)
+        created_full_reload_service = True
 
     logger.info(f"Registered {len(_workflow_registry.workflows)} workflows")
 
@@ -87,6 +103,9 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
 
     if created_reload_service:
         _reload_service = None
+
+    if created_full_reload_service:
+        _full_reload_service = None
 
     logger.info("Shutdown complete")
 

@@ -45,6 +45,9 @@ Endpoints:
 
 - `GET /health` — health check
 - `POST /webhooks/notion` — Notion automation webhook receiver
+- `POST /api/reload` — start all-databases reload job
+- `POST /api/reload/all` — alias endpoint for all-databases reload
+- `GET /api/reload/{job_id}` — all-databases reload job status
 - `POST /api/gastos/reload` — start a Gastos reload job
 - `GET /api/gastos/reload/{job_id}` — job status
 
@@ -71,6 +74,7 @@ Current workflow names:
 
 - **[Workflows](./workflows.md)** - Workflow behaviors, triggers, and Notion requirements
 - **[Architecture](./architecture.md)** - System design, components, and request flow
+- **[Full Reload](./reload.md)** - Reload all configured Notion DBs into SQLite
 - **[Gastos Feature](./gastos.md)** - Local storage + reload API (SQLite)
 - **[Testing](./testing.md)** - Running tests, fixtures, and writing new tests
 - **[Extending](./extending.md)** - Adding new workflows and features

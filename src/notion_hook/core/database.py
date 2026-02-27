@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import asyncio
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Sequence
 from typing import ParamSpec, TypeVar
 
 import aiosqlite
@@ -10,6 +10,7 @@ from notion_hook.config import Settings
 from notion_hook.core.exceptions import NotionHookError
 from notion_hook.core.logging import get_logger
 from notion_hook.models.gastos import FailLogEntry, Gasto
+from notion_hook.models.notion_db import Atraccion, Ciudad, Cronograma, Pasaje
 
 logger = get_logger("core.database")
 
@@ -79,12 +80,61 @@ class DatabaseClient:
                 category TEXT,
                 amount REAL,
                 date DATE,
+                persona TEXT,
                 created_at TIMESTAMP NOT NULL,
                 updated_at TIMESTAMP NOT NULL
             )
         """
         )
         await self._ensure_gastos_schema()
+        await self.conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS ciudades (
+                page_id TEXT PRIMARY KEY,
+                name TEXT,
+                created_at TIMESTAMP NOT NULL,
+                updated_at TIMESTAMP NOT NULL
+            )
+        """
+        )
+        await self.conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS cronograma (
+                page_id TEXT PRIMARY KEY,
+                day DATE,
+                ciudad_page_id TEXT REFERENCES ciudades(page_id) ON DELETE SET NULL,
+                created_at TIMESTAMP NOT NULL,
+                updated_at TIMESTAMP NOT NULL
+            )
+        """
+        )
+        await self.conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS pasajes (
+                page_id TEXT PRIMARY KEY,
+                departure DATE,
+                cronograma_page_id TEXT
+                    REFERENCES cronograma(page_id) ON DELETE SET NULL,
+                ciudad_page_id TEXT REFERENCES ciudades(page_id) ON DELETE SET NULL,
+                created_at TIMESTAMP NOT NULL,
+                updated_at TIMESTAMP NOT NULL
+            )
+        """
+        )
+        await self.conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS atracciones (
+                page_id TEXT PRIMARY KEY,
+                name TEXT,
+                fecha DATE,
+                cronograma_page_id TEXT
+                    REFERENCES cronograma(page_id) ON DELETE SET NULL,
+                ciudad_page_id TEXT REFERENCES ciudades(page_id) ON DELETE SET NULL,
+                created_at TIMESTAMP NOT NULL,
+                updated_at TIMESTAMP NOT NULL
+            )
+        """
+        )
         await self.conn.execute(
             """
             CREATE TABLE IF NOT EXISTS fail_log (
@@ -105,6 +155,36 @@ class DatabaseClient:
         await self.conn.execute(
             """
             CREATE INDEX IF NOT EXISTS idx_fail_log_created_at ON fail_log(created_at)
+        """
+        )
+        await self.conn.execute(
+            """
+            CREATE INDEX IF NOT EXISTS idx_cronograma_ciudad
+            ON cronograma(ciudad_page_id)
+        """
+        )
+        await self.conn.execute(
+            """
+            CREATE INDEX IF NOT EXISTS idx_pasajes_cronograma
+            ON pasajes(cronograma_page_id)
+        """
+        )
+        await self.conn.execute(
+            """
+            CREATE INDEX IF NOT EXISTS idx_pasajes_ciudad
+            ON pasajes(ciudad_page_id)
+        """
+        )
+        await self.conn.execute(
+            """
+            CREATE INDEX IF NOT EXISTS idx_atracciones_cronograma
+            ON atracciones(cronograma_page_id)
+        """
+        )
+        await self.conn.execute(
+            """
+            CREATE INDEX IF NOT EXISTS idx_atracciones_ciudad
+            ON atracciones(ciudad_page_id)
         """
         )
         await self.conn.commit()
@@ -225,10 +305,11 @@ class DatabaseClient:
                     category,
                     amount,
                     date,
+                    persona,
                     created_at,
                     updated_at
                 )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     gasto.page_id,
@@ -237,6 +318,7 @@ class DatabaseClient:
                     gasto.category,
                     gasto.amount,
                     gasto.date,
+                    gasto.persona,
                     gasto.created_at,
                     gasto.updated_at,
                 ),
@@ -262,13 +344,14 @@ class DatabaseClient:
             cursor = await self.conn.execute(
                 """UPDATE gastos
                 SET payment_method = ?, description = ?, category = ?, amount = ?,
-                date = ?, updated_at = ? WHERE page_id = ?""",
+                date = ?, persona = ?, updated_at = ? WHERE page_id = ?""",
                 (
                     gasto.payment_method,
                     gasto.description,
                     gasto.category,
                     gasto.amount,
                     gasto.date,
+                    gasto.persona,
                     gasto.updated_at,
                     gasto.page_id,
                 ),
@@ -387,12 +470,12 @@ class DatabaseClient:
             placeholders = ",".join("?" for _ in page_ids)
 
             existing: dict[
-                str, tuple[object, object, object, object, object, object]
+                str, tuple[object, object, object, object, object, object, object]
             ] = {}
             async with self.conn.execute(
                 f"""
                 SELECT page_id, payment_method, description,
-                category, amount, date, updated_at
+                category, amount, date, persona, updated_at
                 FROM gastos
                 WHERE page_id IN ({placeholders})
                 """,
@@ -407,6 +490,7 @@ class DatabaseClient:
                         row[4],
                         row[5],
                         row[6],
+                        row[7],
                     )
 
             created = 0
@@ -425,7 +509,8 @@ class DatabaseClient:
                             and row[2] == gasto.category
                             and row[3] == gasto.amount
                             and row[4] == gasto.date
-                            and row[5] == gasto.updated_at
+                            and row[5] == gasto.persona
+                            and row[6] == gasto.updated_at
                         ):
                             skipped += 1
                             continue
@@ -435,13 +520,14 @@ class DatabaseClient:
                                 """UPDATE gastos
                                 SET payment_method = ?, description = ?,
                                 category = ?, amount = ?, date = ?,
-                                updated_at = ? WHERE page_id = ?""",
+                                persona = ?, updated_at = ? WHERE page_id = ?""",
                                 (
                                     gasto.payment_method,
                                     gasto.description,
                                     gasto.category,
                                     gasto.amount,
                                     gasto.date,
+                                    gasto.persona,
                                     gasto.updated_at,
                                     gasto.page_id,
                                 ),
@@ -463,10 +549,11 @@ class DatabaseClient:
                                     category,
                                     amount,
                                     date,
+                                    persona,
                                     created_at,
                                     updated_at
                                 )
-                                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
                                 """,
                                 (
                                     gasto.page_id,
@@ -475,6 +562,7 @@ class DatabaseClient:
                                     gasto.category,
                                     gasto.amount,
                                     gasto.date,
+                                    gasto.persona,
                                     gasto.created_at,
                                     gasto.updated_at,
                                 ),
@@ -494,6 +582,607 @@ class DatabaseClient:
             return (created, updated, skipped, failed)
 
         return await self._retry_operation("sync_batch", _sync)
+
+    async def sync_ciudades_batch(
+        self, ciudades: list[Ciudad], *, update_if_changed: bool
+    ) -> tuple[int, int, int, int]:
+        """Insert/update a batch of ciudades records."""
+        rows = [
+            (
+                c.page_id,
+                c.name,
+                c.created_at,
+                c.updated_at,
+            )
+            for c in ciudades
+        ]
+        return await self._sync_table_batch(
+            table_name="ciudades",
+            columns=["name", "created_at", "updated_at"],
+            rows=rows,
+            update_if_changed=update_if_changed,
+        )
+
+    async def sync_cronograma_batch(
+        self, cronograma: list[Cronograma], *, update_if_changed: bool
+    ) -> tuple[int, int, int, int]:
+        """Insert/update a batch of cronograma records."""
+        rows = [
+            (
+                c.page_id,
+                c.day,
+                c.ciudad_page_id,
+                c.created_at,
+                c.updated_at,
+            )
+            for c in cronograma
+        ]
+        return await self._sync_table_batch(
+            table_name="cronograma",
+            columns=["day", "ciudad_page_id", "created_at", "updated_at"],
+            rows=rows,
+            update_if_changed=update_if_changed,
+        )
+
+    async def sync_pasajes_batch(
+        self, pasajes: list[Pasaje], *, update_if_changed: bool
+    ) -> tuple[int, int, int, int]:
+        """Insert/update a batch of pasajes records."""
+        rows = [
+            (
+                p.page_id,
+                p.departure,
+                p.cronograma_page_id,
+                p.ciudad_page_id,
+                p.created_at,
+                p.updated_at,
+            )
+            for p in pasajes
+        ]
+        return await self._sync_table_batch(
+            table_name="pasajes",
+            columns=[
+                "departure",
+                "cronograma_page_id",
+                "ciudad_page_id",
+                "created_at",
+                "updated_at",
+            ],
+            rows=rows,
+            update_if_changed=update_if_changed,
+        )
+
+    async def sync_atracciones_batch(
+        self, atracciones: list[Atraccion], *, update_if_changed: bool
+    ) -> tuple[int, int, int, int]:
+        """Insert/update a batch of atracciones records."""
+        rows = [
+            (
+                a.page_id,
+                a.name,
+                a.fecha,
+                a.cronograma_page_id,
+                a.ciudad_page_id,
+                a.created_at,
+                a.updated_at,
+            )
+            for a in atracciones
+        ]
+        return await self._sync_table_batch(
+            table_name="atracciones",
+            columns=[
+                "name",
+                "fecha",
+                "cronograma_page_id",
+                "ciudad_page_id",
+                "created_at",
+                "updated_at",
+            ],
+            rows=rows,
+            update_if_changed=update_if_changed,
+        )
+
+    async def _sync_table_batch(
+        self,
+        *,
+        table_name: str,
+        columns: list[str],
+        rows: Sequence[tuple[object, ...]],
+        update_if_changed: bool,
+    ) -> tuple[int, int, int, int]:
+        """Insert/update a batch of records for a table."""
+        if not rows:
+            return (0, 0, 0, 0)
+
+        self._validate_table_name(table_name)
+
+        async def _sync() -> tuple[int, int, int, int]:
+            page_ids = [str(row[0]) for row in rows]
+            placeholders = ",".join("?" for _ in page_ids)
+            select_cols = ", ".join(columns)
+            existing: dict[str, tuple[object, ...]] = {}
+
+            async with self.conn.execute(
+                f"SELECT page_id, {select_cols} FROM {table_name} "
+                f"WHERE page_id IN ({placeholders})",
+                page_ids,
+            ) as cursor:
+                for row in await cursor.fetchall():
+                    existing[str(row[0])] = tuple(row[1:])
+
+            created = 0
+            updated = 0
+            skipped = 0
+            failed = 0
+
+            await self.conn.execute("BEGIN")
+            try:
+                for row in rows:
+                    page_id = str(row[0])
+                    payload = tuple(row[1:])
+                    previous = existing.get(page_id)
+
+                    if previous is not None:
+                        if update_if_changed and previous == payload:
+                            skipped += 1
+                            continue
+
+                        assignments = ", ".join(f"{col} = ?" for col in columns)
+                        try:
+                            await self.conn.execute(
+                                f"UPDATE {table_name} SET {assignments} "
+                                "WHERE page_id = ?",
+                                (*payload, page_id),
+                            )
+                            updated += 1
+                        except Exception as e:
+                            failed += 1
+                            logger.warning(
+                                f"Failed to update {table_name} row {page_id}: {e}"
+                            )
+                    else:
+                        placeholders_insert = ", ".join(
+                            "?" for _ in range(len(columns) + 1)
+                        )
+                        columns_insert = ", ".join(["page_id", *columns])
+                        try:
+                            await self.conn.execute(
+                                f"INSERT INTO {table_name} ({columns_insert}) "
+                                f"VALUES ({placeholders_insert})",
+                                (page_id, *payload),
+                            )
+                            created += 1
+                        except Exception as e:
+                            failed += 1
+                            logger.warning(
+                                f"Failed to create {table_name} row {page_id}: {e}"
+                            )
+
+                await self.conn.commit()
+            except Exception:
+                await self.conn.rollback()
+                raise
+
+            return (created, updated, skipped, failed)
+
+        return await self._retry_operation(f"sync_{table_name}", _sync)
+
+    async def clear_sync_tables(self, *, include_gastos: bool = True) -> dict[str, int]:
+        """Delete all rows from sync tables in FK-safe order."""
+        order = ["atracciones", "pasajes", "cronograma", "ciudades"]
+        if include_gastos:
+            order.append("gastos")
+
+        async def _clear_all() -> dict[str, int]:
+            result: dict[str, int] = {}
+            for table in order:
+                self._validate_table_name(table)
+                async with self.conn.execute(f"SELECT COUNT(*) FROM {table}") as cursor:
+                    row = await cursor.fetchone()
+                    result[table] = int(row[0]) if row else 0
+                await self.conn.execute(f"DELETE FROM {table}")
+            await self.conn.commit()
+            return result
+
+        return await self._retry_operation("clear_sync_tables", _clear_all)
+
+    async def get_all_page_ids(self, table_name: str) -> set[str]:
+        """Get all page IDs from a supported table."""
+        self._validate_table_name(table_name)
+
+        async def _get_all_ids() -> set[str]:
+            async with self.conn.execute(f"SELECT page_id FROM {table_name}") as cursor:
+                rows = await cursor.fetchall()
+                return {str(row[0]) for row in rows}
+
+        return await self._retry_operation(f"get_all_ids_{table_name}", _get_all_ids)
+
+    async def delete_by_page_ids(self, table_name: str, page_ids: list[str]) -> int:
+        """Delete rows by page_id in batches for a supported table."""
+        self._validate_table_name(table_name)
+        if not page_ids:
+            return 0
+
+        async def _delete_many() -> int:
+            deleted = 0
+            chunk_size = 900
+            await self.conn.execute("BEGIN")
+            try:
+                for i in range(0, len(page_ids), chunk_size):
+                    chunk = page_ids[i : i + chunk_size]
+                    placeholders = ",".join("?" for _ in chunk)
+                    cursor = await self.conn.execute(
+                        f"DELETE FROM {table_name} WHERE page_id IN ({placeholders})",
+                        chunk,
+                    )
+                    if cursor.rowcount and cursor.rowcount > 0:
+                        deleted += cursor.rowcount
+                await self.conn.commit()
+            except Exception:
+                await self.conn.rollback()
+                raise
+            return deleted
+
+        return await self._retry_operation(f"delete_many_{table_name}", _delete_many)
+
+    async def get_ciudad(self, page_id: str) -> Ciudad | None:
+        """Retrieve a single ciudad by page_id."""
+
+        async def _get() -> Ciudad | None:
+            async with self.conn.execute(
+                """
+                SELECT page_id, name, created_at, updated_at
+                FROM ciudades
+                WHERE page_id = ?
+                """,
+                (page_id,),
+            ) as cursor:
+                row = await cursor.fetchone()
+                if row:
+                    return Ciudad(
+                        page_id=str(row[0]),
+                        name=row[1],
+                        created_at=str(row[2]),
+                        updated_at=str(row[3]),
+                    )
+            return None
+
+        return await self._retry_operation("get_ciudad", _get)
+
+    async def create_ciudad(self, ciudad: Ciudad) -> None:
+        """Insert a new ciudad."""
+
+        async def _insert() -> None:
+            await self.conn.execute(
+                """
+                INSERT INTO ciudades (page_id, name, created_at, updated_at)
+                VALUES (?, ?, ?, ?)
+                """,
+                (
+                    ciudad.page_id,
+                    ciudad.name,
+                    ciudad.created_at,
+                    ciudad.updated_at,
+                ),
+            )
+            await self.conn.commit()
+
+        await self._retry_operation("create_ciudad", _insert)
+
+    async def update_ciudad(self, ciudad: Ciudad) -> bool:
+        """Update an existing ciudad."""
+
+        async def _update() -> bool:
+            cursor = await self.conn.execute(
+                """
+                UPDATE ciudades
+                SET name = ?, updated_at = ?
+                WHERE page_id = ?
+                """,
+                (ciudad.name, ciudad.updated_at, ciudad.page_id),
+            )
+            await self.conn.commit()
+            return cursor.rowcount > 0
+
+        return await self._retry_operation("update_ciudad", _update)
+
+    async def delete_ciudad(self, page_id: str) -> bool:
+        """Delete a ciudad by page_id."""
+
+        async def _delete() -> bool:
+            cursor = await self.conn.execute(
+                "DELETE FROM ciudades WHERE page_id = ?",
+                (page_id,),
+            )
+            await self.conn.commit()
+            return cursor.rowcount > 0
+
+        return await self._retry_operation("delete_ciudad", _delete)
+
+    async def get_cronograma(self, page_id: str) -> Cronograma | None:
+        """Retrieve a single cronograma entry by page_id."""
+
+        async def _get() -> Cronograma | None:
+            async with self.conn.execute(
+                """
+                SELECT page_id, day, ciudad_page_id, created_at, updated_at
+                FROM cronograma
+                WHERE page_id = ?
+                """,
+                (page_id,),
+            ) as cursor:
+                row = await cursor.fetchone()
+                if row:
+                    return Cronograma(
+                        page_id=str(row[0]),
+                        day=row[1],
+                        ciudad_page_id=row[2],
+                        created_at=str(row[3]),
+                        updated_at=str(row[4]),
+                    )
+            return None
+
+        return await self._retry_operation("get_cronograma", _get)
+
+    async def create_cronograma(self, cronograma: Cronograma) -> None:
+        """Insert a new cronograma entry."""
+
+        async def _insert() -> None:
+            await self.conn.execute(
+                """
+                INSERT INTO cronograma (
+                    page_id, day, ciudad_page_id, created_at, updated_at
+                )
+                VALUES (?, ?, ?, ?, ?)
+                """,
+                (
+                    cronograma.page_id,
+                    cronograma.day,
+                    cronograma.ciudad_page_id,
+                    cronograma.created_at,
+                    cronograma.updated_at,
+                ),
+            )
+            await self.conn.commit()
+
+        await self._retry_operation("create_cronograma", _insert)
+
+    async def update_cronograma(self, cronograma: Cronograma) -> bool:
+        """Update an existing cronograma entry."""
+
+        async def _update() -> bool:
+            cursor = await self.conn.execute(
+                """
+                UPDATE cronograma
+                SET day = ?, ciudad_page_id = ?, updated_at = ?
+                WHERE page_id = ?
+                """,
+                (
+                    cronograma.day,
+                    cronograma.ciudad_page_id,
+                    cronograma.updated_at,
+                    cronograma.page_id,
+                ),
+            )
+            await self.conn.commit()
+            return cursor.rowcount > 0
+
+        return await self._retry_operation("update_cronograma", _update)
+
+    async def delete_cronograma(self, page_id: str) -> bool:
+        """Delete a cronograma entry by page_id."""
+
+        async def _delete() -> bool:
+            cursor = await self.conn.execute(
+                "DELETE FROM cronograma WHERE page_id = ?",
+                (page_id,),
+            )
+            await self.conn.commit()
+            return cursor.rowcount > 0
+
+        return await self._retry_operation("delete_cronograma", _delete)
+
+    async def get_pasaje(self, page_id: str) -> Pasaje | None:
+        """Retrieve a single pasaje by page_id."""
+
+        async def _get() -> Pasaje | None:
+            async with self.conn.execute(
+                """
+                SELECT page_id, departure, cronograma_page_id,
+                ciudad_page_id, created_at, updated_at
+                FROM pasajes
+                WHERE page_id = ?
+                """,
+                (page_id,),
+            ) as cursor:
+                row = await cursor.fetchone()
+                if row:
+                    return Pasaje(
+                        page_id=str(row[0]),
+                        departure=row[1],
+                        cronograma_page_id=row[2],
+                        ciudad_page_id=row[3],
+                        created_at=str(row[4]),
+                        updated_at=str(row[5]),
+                    )
+            return None
+
+        return await self._retry_operation("get_pasaje", _get)
+
+    async def create_pasaje(self, pasaje: Pasaje) -> None:
+        """Insert a new pasaje."""
+
+        async def _insert() -> None:
+            await self.conn.execute(
+                """
+                INSERT INTO pasajes (
+                    page_id,
+                    departure,
+                    cronograma_page_id,
+                    ciudad_page_id,
+                    created_at,
+                    updated_at
+                )
+                VALUES (?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    pasaje.page_id,
+                    pasaje.departure,
+                    pasaje.cronograma_page_id,
+                    pasaje.ciudad_page_id,
+                    pasaje.created_at,
+                    pasaje.updated_at,
+                ),
+            )
+            await self.conn.commit()
+
+        await self._retry_operation("create_pasaje", _insert)
+
+    async def update_pasaje(self, pasaje: Pasaje) -> bool:
+        """Update an existing pasaje."""
+
+        async def _update() -> bool:
+            cursor = await self.conn.execute(
+                """
+                UPDATE pasajes
+                SET departure = ?, cronograma_page_id = ?,
+                    ciudad_page_id = ?, updated_at = ?
+                WHERE page_id = ?
+                """,
+                (
+                    pasaje.departure,
+                    pasaje.cronograma_page_id,
+                    pasaje.ciudad_page_id,
+                    pasaje.updated_at,
+                    pasaje.page_id,
+                ),
+            )
+            await self.conn.commit()
+            return cursor.rowcount > 0
+
+        return await self._retry_operation("update_pasaje", _update)
+
+    async def delete_pasaje(self, page_id: str) -> bool:
+        """Delete a pasaje by page_id."""
+
+        async def _delete() -> bool:
+            cursor = await self.conn.execute(
+                "DELETE FROM pasajes WHERE page_id = ?",
+                (page_id,),
+            )
+            await self.conn.commit()
+            return cursor.rowcount > 0
+
+        return await self._retry_operation("delete_pasaje", _delete)
+
+    async def get_atraccion(self, page_id: str) -> Atraccion | None:
+        """Retrieve a single atraccion by page_id."""
+
+        async def _get() -> Atraccion | None:
+            async with self.conn.execute(
+                """
+                SELECT page_id, name, fecha, cronograma_page_id,
+                ciudad_page_id, created_at, updated_at
+                FROM atracciones
+                WHERE page_id = ?
+                """,
+                (page_id,),
+            ) as cursor:
+                row = await cursor.fetchone()
+                if row:
+                    return Atraccion(
+                        page_id=str(row[0]),
+                        name=row[1],
+                        fecha=row[2],
+                        cronograma_page_id=row[3],
+                        ciudad_page_id=row[4],
+                        created_at=str(row[5]),
+                        updated_at=str(row[6]),
+                    )
+            return None
+
+        return await self._retry_operation("get_atraccion", _get)
+
+    async def create_atraccion(self, atraccion: Atraccion) -> None:
+        """Insert a new atraccion."""
+
+        async def _insert() -> None:
+            await self.conn.execute(
+                """
+                INSERT INTO atracciones (
+                    page_id,
+                    name,
+                    fecha,
+                    cronograma_page_id,
+                    ciudad_page_id,
+                    created_at,
+                    updated_at
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    atraccion.page_id,
+                    atraccion.name,
+                    atraccion.fecha,
+                    atraccion.cronograma_page_id,
+                    atraccion.ciudad_page_id,
+                    atraccion.created_at,
+                    atraccion.updated_at,
+                ),
+            )
+            await self.conn.commit()
+
+        await self._retry_operation("create_atraccion", _insert)
+
+    async def update_atraccion(self, atraccion: Atraccion) -> bool:
+        """Update an existing atraccion."""
+
+        async def _update() -> bool:
+            cursor = await self.conn.execute(
+                """
+                UPDATE atracciones
+                SET name = ?, fecha = ?, cronograma_page_id = ?,
+                    ciudad_page_id = ?, updated_at = ?
+                WHERE page_id = ?
+                """,
+                (
+                    atraccion.name,
+                    atraccion.fecha,
+                    atraccion.cronograma_page_id,
+                    atraccion.ciudad_page_id,
+                    atraccion.updated_at,
+                    atraccion.page_id,
+                ),
+            )
+            await self.conn.commit()
+            return cursor.rowcount > 0
+
+        return await self._retry_operation("update_atraccion", _update)
+
+    async def delete_atraccion(self, page_id: str) -> bool:
+        """Delete an atraccion by page_id."""
+
+        async def _delete() -> bool:
+            cursor = await self.conn.execute(
+                "DELETE FROM atracciones WHERE page_id = ?",
+                (page_id,),
+            )
+            await self.conn.commit()
+            return cursor.rowcount > 0
+
+        return await self._retry_operation("delete_atraccion", _delete)
+
+    def _validate_table_name(self, table_name: str) -> None:
+        allowed = {
+            "atracciones",
+            "ciudades",
+            "cronograma",
+            "fail_log",
+            "gastos",
+            "pasajes",
+        }
+        if table_name not in allowed:
+            raise DatabaseError(f"Unsupported table name: {table_name}")
 
     async def list_gastos(self, limit: int = 100, offset: int = 0) -> list[Gasto]:
         """List gastos with pagination.

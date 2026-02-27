@@ -18,6 +18,7 @@ os.environ["PASAJES_DATABASE_ID"] = "test-pasajes-db-id"
 from notion_hook.config import Settings, clear_settings_cache
 from notion_hook.core.database import DatabaseClient
 from notion_hook.models.gastos import Gasto
+from notion_hook.models.notion_db import Atraccion, Ciudad, Cronograma, Pasaje
 
 
 @pytest.fixture(autouse=True)
@@ -254,6 +255,165 @@ class TestDatabaseClient:
         assert gasto is None
 
     @pytest.mark.asyncio
+    async def test_ciudad_crud(self, db_client: DatabaseClient) -> None:
+        """Test create/get/update/delete for ciudades."""
+        ciudad = Ciudad(
+            page_id="city-1",
+            name="Buenos Aires",
+            created_at="2024-01-01T00:00:00Z",
+            updated_at="2024-01-01T00:00:00Z",
+        )
+        await db_client.create_ciudad(ciudad)
+
+        saved = await db_client.get_ciudad("city-1")
+        assert saved is not None
+        assert saved.name == "Buenos Aires"
+
+        updated = Ciudad(
+            page_id="city-1",
+            name="CABA",
+            created_at="2024-01-01T00:00:00Z",
+            updated_at="2024-01-02T00:00:00Z",
+        )
+        assert await db_client.update_ciudad(updated) is True
+
+        saved_after = await db_client.get_ciudad("city-1")
+        assert saved_after is not None
+        assert saved_after.name == "CABA"
+        assert await db_client.delete_ciudad("city-1") is True
+        assert await db_client.get_ciudad("city-1") is None
+
+    @pytest.mark.asyncio
+    async def test_cronograma_crud(self, db_client: DatabaseClient) -> None:
+        """Test create/get/update/delete for cronograma."""
+        await db_client.create_ciudad(
+            Ciudad(
+                page_id="city-1",
+                name="Buenos Aires",
+                created_at="2024-01-01T00:00:00Z",
+                updated_at="2024-01-01T00:00:00Z",
+            )
+        )
+        cronograma = Cronograma(
+            page_id="cron-1",
+            day="2026-03-14",
+            ciudad_page_id="city-1",
+            created_at="2024-01-01T00:00:00Z",
+            updated_at="2024-01-01T00:00:00Z",
+        )
+        await db_client.create_cronograma(cronograma)
+        saved = await db_client.get_cronograma("cron-1")
+        assert saved is not None
+        assert saved.day == "2026-03-14"
+
+        cronograma.day = "2026-03-15"
+        cronograma.updated_at = "2024-01-02T00:00:00Z"
+        assert await db_client.update_cronograma(cronograma) is True
+        saved_after = await db_client.get_cronograma("cron-1")
+        assert saved_after is not None
+        assert saved_after.day == "2026-03-15"
+        assert await db_client.delete_cronograma("cron-1") is True
+
+    @pytest.mark.asyncio
+    async def test_pasaje_crud(self, db_client: DatabaseClient) -> None:
+        """Test create/get/update/delete for pasajes."""
+        await db_client.create_ciudad(
+            Ciudad(
+                page_id="city-1",
+                name="Buenos Aires",
+                created_at="2024-01-01T00:00:00Z",
+                updated_at="2024-01-01T00:00:00Z",
+            )
+        )
+        await db_client.create_cronograma(
+            Cronograma(
+                page_id="cron-1",
+                day="2026-03-14",
+                ciudad_page_id="city-1",
+                created_at="2024-01-01T00:00:00Z",
+                updated_at="2024-01-01T00:00:00Z",
+            )
+        )
+        pasaje = Pasaje(
+            page_id="pas-1",
+            departure="2026-03-14",
+            cronograma_page_id="cron-1",
+            ciudad_page_id="city-1",
+            created_at="2024-01-01T00:00:00Z",
+            updated_at="2024-01-01T00:00:00Z",
+        )
+        await db_client.create_pasaje(pasaje)
+        saved = await db_client.get_pasaje("pas-1")
+        assert saved is not None
+        assert saved.departure == "2026-03-14"
+
+        pasaje.departure = "2026-03-16"
+        pasaje.updated_at = "2024-01-02T00:00:00Z"
+        assert await db_client.update_pasaje(pasaje) is True
+        saved_after = await db_client.get_pasaje("pas-1")
+        assert saved_after is not None
+        assert saved_after.departure == "2026-03-16"
+        assert await db_client.delete_pasaje("pas-1") is True
+
+    @pytest.mark.asyncio
+    async def test_atraccion_crud(self, db_client: DatabaseClient) -> None:
+        """Test create/get/update/delete for atracciones."""
+        await db_client.create_ciudad(
+            Ciudad(
+                page_id="city-1",
+                name="Buenos Aires",
+                created_at="2024-01-01T00:00:00Z",
+                updated_at="2024-01-01T00:00:00Z",
+            )
+        )
+        await db_client.create_cronograma(
+            Cronograma(
+                page_id="cron-1",
+                day="2026-03-14",
+                ciudad_page_id="city-1",
+                created_at="2024-01-01T00:00:00Z",
+                updated_at="2024-01-01T00:00:00Z",
+            )
+        )
+        atraccion = Atraccion(
+            page_id="atr-1",
+            name="Obelisco",
+            fecha="2026-03-14",
+            cronograma_page_id="cron-1",
+            ciudad_page_id="city-1",
+            created_at="2024-01-01T00:00:00Z",
+            updated_at="2024-01-01T00:00:00Z",
+        )
+        await db_client.create_atraccion(atraccion)
+        saved = await db_client.get_atraccion("atr-1")
+        assert saved is not None
+        assert saved.name == "Obelisco"
+
+        atraccion.name = "Teatro Colon"
+        atraccion.updated_at = "2024-01-02T00:00:00Z"
+        assert await db_client.update_atraccion(atraccion) is True
+        saved_after = await db_client.get_atraccion("atr-1")
+        assert saved_after is not None
+        assert saved_after.name == "Teatro Colon"
+        assert await db_client.delete_atraccion("atr-1") is True
+
+    @pytest.mark.asyncio
+    async def test_create_child_with_missing_fk_fails(
+        self, db_client: DatabaseClient
+    ) -> None:
+        """Test FK enforcement for new CRUD methods."""
+        with pytest.raises(Exception):
+            await db_client.create_cronograma(
+                Cronograma(
+                    page_id="cron-missing",
+                    day="2026-03-14",
+                    ciudad_page_id="missing-city",
+                    created_at="2024-01-01T00:00:00Z",
+                    updated_at="2024-01-01T00:00:00Z",
+                )
+            )
+
+    @pytest.mark.asyncio
     async def test_foreign_keys_pragma_enabled(self, db_client: DatabaseClient) -> None:
         """Test that foreign key constraints are enabled."""
         # Query the foreign_keys pragma to verify it's enabled
@@ -359,3 +519,167 @@ class TestDatabaseClient:
         await db_client.conn.execute("DROP TABLE IF EXISTS test_child")
         await db_client.conn.execute("DROP TABLE IF EXISTS test_parent")
         await db_client.conn.commit()
+
+    @pytest.mark.asyncio
+    async def test_sync_ciudades_and_children(self, db_client: DatabaseClient) -> None:
+        """Test parent-child sync methods preserve FK integrity."""
+        ciudades = [
+            Ciudad(
+                page_id="city-1",
+                name="Buenos Aires",
+                created_at="2024-01-01T00:00:00Z",
+                updated_at="2024-01-01T00:00:00Z",
+            )
+        ]
+        cronograma = [
+            Cronograma(
+                page_id="cron-1",
+                day="2026-03-14",
+                ciudad_page_id="city-1",
+                created_at="2024-01-01T00:00:00Z",
+                updated_at="2024-01-01T00:00:00Z",
+            )
+        ]
+        pasajes = [
+            Pasaje(
+                page_id="pas-1",
+                departure="2026-03-14",
+                cronograma_page_id="cron-1",
+                ciudad_page_id="city-1",
+                created_at="2024-01-01T00:00:00Z",
+                updated_at="2024-01-01T00:00:00Z",
+            )
+        ]
+        atracciones = [
+            Atraccion(
+                page_id="atr-1",
+                name="Obelisco",
+                fecha="2026-03-14",
+                cronograma_page_id="cron-1",
+                ciudad_page_id="city-1",
+                created_at="2024-01-01T00:00:00Z",
+                updated_at="2024-01-01T00:00:00Z",
+            )
+        ]
+
+        assert await db_client.sync_ciudades_batch(
+            ciudades, update_if_changed=False
+        ) == (
+            1,
+            0,
+            0,
+            0,
+        )
+        assert await db_client.sync_cronograma_batch(
+            cronograma, update_if_changed=False
+        ) == (1, 0, 0, 0)
+        assert await db_client.sync_pasajes_batch(pasajes, update_if_changed=False) == (
+            1,
+            0,
+            0,
+            0,
+        )
+        assert await db_client.sync_atracciones_batch(
+            atracciones, update_if_changed=False
+        ) == (1, 0, 0, 0)
+
+        async with db_client.conn.execute("SELECT COUNT(*) FROM ciudades") as cursor:
+            row = await cursor.fetchone()
+            assert row is not None
+            assert row[0] == 1
+        async with db_client.conn.execute("SELECT COUNT(*) FROM cronograma") as cursor:
+            row = await cursor.fetchone()
+            assert row is not None
+            assert row[0] == 1
+        async with db_client.conn.execute("SELECT COUNT(*) FROM pasajes") as cursor:
+            row = await cursor.fetchone()
+            assert row is not None
+            assert row[0] == 1
+        async with db_client.conn.execute("SELECT COUNT(*) FROM atracciones") as cursor:
+            row = await cursor.fetchone()
+            assert row is not None
+            assert row[0] == 1
+
+    @pytest.mark.asyncio
+    async def test_sync_child_fails_without_parent(
+        self, db_client: DatabaseClient
+    ) -> None:
+        """Test sync reports FK failures when parent rows are missing."""
+        cronograma = [
+            Cronograma(
+                page_id="cron-1",
+                day="2026-03-14",
+                ciudad_page_id="missing-city",
+                created_at="2024-01-01T00:00:00Z",
+                updated_at="2024-01-01T00:00:00Z",
+            )
+        ]
+        created, updated, skipped, failed = await db_client.sync_cronograma_batch(
+            cronograma, update_if_changed=False
+        )
+        assert created == 0
+        assert updated == 0
+        assert skipped == 0
+        assert failed == 1
+
+    @pytest.mark.asyncio
+    async def test_clear_sync_tables_child_first(
+        self, db_client: DatabaseClient
+    ) -> None:
+        """Test clear_sync_tables deletes rows while respecting dependencies."""
+        await db_client.sync_ciudades_batch(
+            [
+                Ciudad(
+                    page_id="city-1",
+                    name="Buenos Aires",
+                    created_at="2024-01-01T00:00:00Z",
+                    updated_at="2024-01-01T00:00:00Z",
+                )
+            ],
+            update_if_changed=False,
+        )
+        await db_client.sync_cronograma_batch(
+            [
+                Cronograma(
+                    page_id="cron-1",
+                    day="2026-03-14",
+                    ciudad_page_id="city-1",
+                    created_at="2024-01-01T00:00:00Z",
+                    updated_at="2024-01-01T00:00:00Z",
+                )
+            ],
+            update_if_changed=False,
+        )
+        await db_client.sync_pasajes_batch(
+            [
+                Pasaje(
+                    page_id="pas-1",
+                    departure="2026-03-14",
+                    cronograma_page_id="cron-1",
+                    ciudad_page_id="city-1",
+                    created_at="2024-01-01T00:00:00Z",
+                    updated_at="2024-01-01T00:00:00Z",
+                )
+            ],
+            update_if_changed=False,
+        )
+        await db_client.sync_atracciones_batch(
+            [
+                Atraccion(
+                    page_id="atr-1",
+                    name="Obelisco",
+                    fecha="2026-03-14",
+                    cronograma_page_id="cron-1",
+                    ciudad_page_id="city-1",
+                    created_at="2024-01-01T00:00:00Z",
+                    updated_at="2024-01-01T00:00:00Z",
+                )
+            ],
+            update_if_changed=False,
+        )
+
+        deleted = await db_client.clear_sync_tables(include_gastos=False)
+        assert deleted["atracciones"] == 1
+        assert deleted["pasajes"] == 1
+        assert deleted["cronograma"] == 1
+        assert deleted["ciudades"] == 1

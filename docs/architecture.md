@@ -40,7 +40,8 @@ NHook is a FastAPI-based webhook server that receives events from Notion automat
 │   ├── routes.py          # Router aggregation
 │   ├── webhooks.py        # Webhook endpoint
 │   ├── health.py          # Health check
-│   └── reload.py         # Gastos reload endpoint
+│   ├── reload.py          # Gastos reload endpoint
+│   └── full_reload.py     # All-databases reload endpoint
 ├── core/                  # Shared utilities
 │   ├── auth.py            # Authentication
 │   ├── database.py        # SQLite database client
@@ -56,7 +57,8 @@ NHook is a FastAPI-based webhook server that receives events from Notion automat
  │   ├── atracciones_sync.py # Atracciones sync implementation
  │   └── gastos_sync.py     # Gastos sync implementation
 ├── services/              # Business services
-│   └── gastos_reload.py   # Gastos reload service
+│   ├── gastos_reload.py   # Gastos reload service
+│   └── notion_reload.py   # All-databases reload service
 └── models/                # Data models
     ├── webhook.py         # Pydantic models for webhooks
     └── gastos.py         # Pydantic models for gastos
@@ -120,9 +122,11 @@ Async HTTP client using `httpx` for Notion API operations:
 - `get_page(page_id)` - Retrieve a page
 - `update_page(page_id, properties)` - Update page properties
 - `query_database(database_id, filter, sorts)` - Query with pagination
+- `query_all_database(database_id, page_size, label)` - Query whole DB with pagination
 - `find_cronograma_by_dates(dates)` - Find Cronograma entries by date
 - `update_gastos_cronograma_relation(page_id, cronograma_ids)` - Update Gastos relation
 - `update_pasajes_cronograma_relation(page_id, cronograma_ids)` - Update Pasajes relation
+- `query_all_ciudades()` / `query_all_cronograma()` / `query_all_pasajes()` / `query_all_atracciones()` / `query_all_gastos()` - full database scans used by reload
 
 ### Workflow System
 
@@ -214,6 +218,24 @@ The service that provides manual reload from Notion to local database:
     - Data consistency verification
 
 See **[Gastos Feature](./gastos.md)** for complete documentation.
+
+#### Full Reload Service (`services/notion_reload.py`)
+
+Provides manual full/incremental sync for all configured Notion databases into SQLite.
+
+1. **Features**:
+    - Full reload (clear local sync tables, reload all DBs)
+    - Incremental reload (upsert + optional delete missing rows)
+    - FK-safe sync order and child-first delete handling
+    - Global and per-table progress tracking
+2. **API Endpoints**:
+    - `POST /api/reload` - Start all-databases reload job
+    - `POST /api/reload/all` - Alias endpoint
+    - `GET /api/reload/{job_id}` - Get job status
+3. **Note**:
+    - This is manual API-triggered sync, not webhook per-change mirroring.
+
+See **[Full Reload](./reload.md)** for payloads and examples.
 
 ## Request Flow
 

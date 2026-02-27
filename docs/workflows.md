@@ -39,7 +39,63 @@ Date properties are parsed from the nested Notion structure:
 
 Datetime values (e.g. `2026-03-14T10:00:00Z`) are normalized to a date at parse time.
 
+## Property mapping contract
+
+These are the canonical property mappings used by local sync workflows.
+
+| Database | Local table | Required property mapping |
+|---|---|---|
+| Ciudades | `ciudades` | Name/title: `Name` (fallback: `Nombre`, `Ciudad`) |
+| Cronograma | `cronograma` | Day/date: `Día` (fallback: `Dia`, `Date`), city relation: `Ciudad`/`Ciudades` |
+| Pasajes | `pasajes` | Departure date: `Departure`, cronograma relation: `Cronograma`, city relation: `Ciudad`/`Ciudades` |
+| Atracciones | `atracciones` | Name/title: `Name` (fallbacks include `Nombre`), date: `Fecha` (fallback: `Date`), cronograma relation: `Cronograma`, city relation: `Ciudad`/`Ciudades` |
+| Gastos | `gastos` | Existing `Gasto.from_notion_properties` mapping |
+
+Notion automations should send one explicit workflow per DB using:
+
+- `X-Calvo-Workflow: ciudades-sync`
+- `X-Calvo-Workflow: cronograma-sync`
+- `X-Calvo-Workflow: pasajes-sync`
+- `X-Calvo-Workflow: atracciones-sync`
+- `X-Calvo-Workflow: gastos-sync`
+
 ## Workflows
+
+### `ciudades-sync`
+
+**Purpose**: Mirror Ciudades pages into local SQLite (`ciudades`).
+
+**Behavior**:
+
+- `delete` when `archived=true`, `in_trash=true`, or `properties` is empty.
+- otherwise `create` vs `update` based on local existence.
+
+### `cronograma-sync`
+
+**Purpose**: Mirror Cronograma pages into local SQLite (`cronograma`).
+
+**Behavior**:
+
+- `delete` when `archived=true`, `in_trash=true`, or `properties` is empty.
+- otherwise `create` vs `update` based on local existence.
+
+### `pasajes-sync`
+
+**Purpose**: Mirror Pasajes pages into local SQLite (`pasajes`).
+
+**Behavior**:
+
+- `delete` when `archived=true`, `in_trash=true`, or `properties` is empty.
+- otherwise `create` vs `update` based on local existence.
+
+### `atracciones-sync`
+
+**Purpose**: Mirror Atracciones pages into local SQLite (`atracciones`).
+
+**Behavior**:
+
+- `delete` when `archived=true`, `in_trash=true`, or `properties` is empty.
+- otherwise `create` vs `update` based on local existence.
 
 ### `gastos-cronograma`
 

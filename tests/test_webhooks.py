@@ -81,6 +81,43 @@ def test_webhook_with_pasajes_workflow(
     assert data["success"] is True
 
 
+def test_webhook_with_ciudades_sync_workflow(
+    test_client: TestClient, auth_headers: dict[str, str]
+) -> None:
+    """Test webhook handles ciudades local sync workflow."""
+    headers = auth_headers.copy()
+    headers["X-Calvo-Workflow"] = "ciudades-sync"
+    payload = make_notion_webhook_payload(
+        extra_properties={"Name": {"title": [{"plain_text": "Madrid"}]}}
+    )
+    response = test_client.post("/webhooks/notion", json=payload, headers=headers)
+    assert response.status_code == 200
+    data = response.json()
+    assert data["success"] is True
+
+
+def test_webhook_with_cronograma_sync_workflow(
+    test_client: TestClient, auth_headers: dict[str, str]
+) -> None:
+    """Test webhook handles cronograma local sync workflow."""
+    headers = auth_headers.copy()
+    headers["X-Calvo-Workflow"] = "cronograma-sync"
+    payload = make_notion_webhook_payload(
+        property_name="Día",
+        extra_properties={
+            "Día": {
+                "id": "dia-property-id",
+                "type": "date",
+                "date": {"start": "2026-03-14", "end": None, "time_zone": None},
+            }
+        },
+    )
+    response = test_client.post("/webhooks/notion", json=payload, headers=headers)
+    assert response.status_code == 200
+    data = response.json()
+    assert data["success"] is True
+
+
 def test_webhook_requires_workflow_header(
     test_client: TestClient, auth_headers: dict[str, str]
 ) -> None:

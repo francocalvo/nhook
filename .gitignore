@@ -24,3 +24,9 @@ result
 
 # LLM build notes
 llm/
+
+PROMPT.md
+specs/*
+ralph.yml
+.ralph/*
+llm

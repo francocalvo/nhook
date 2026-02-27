@@ -269,6 +269,52 @@ class NotionClient:
         Raises:
             NotionClientError: If the request fails.
         """
+        return await self.query_all_database(
+            self.settings.gastos_database_id,
+            page_size=page_size,
+            label="Gastos",
+        )
+
+    async def query_all_ciudades(self, page_size: int = 100) -> list[dict[str, Any]]:
+        """Query all Ciudades pages from Notion."""
+        return await self.query_all_database(
+            self.settings.ciudades_database_id,
+            page_size=page_size,
+            label="Ciudades",
+        )
+
+    async def query_all_cronograma(self, page_size: int = 100) -> list[dict[str, Any]]:
+        """Query all Cronograma pages from Notion."""
+        return await self.query_all_database(
+            self.settings.cronograma_database_id,
+            page_size=page_size,
+            label="Cronograma",
+        )
+
+    async def query_all_pasajes(self, page_size: int = 100) -> list[dict[str, Any]]:
+        """Query all Pasajes pages from Notion."""
+        return await self.query_all_database(
+            self.settings.pasajes_database_id,
+            page_size=page_size,
+            label="Pasajes",
+        )
+
+    async def query_all_atracciones(self, page_size: int = 100) -> list[dict[str, Any]]:
+        """Query all Atracciones pages from Notion."""
+        return await self.query_all_database(
+            self.settings.atracciones_database_id,
+            page_size=page_size,
+            label="Atracciones",
+        )
+
+    async def query_all_database(
+        self,
+        database_id: str,
+        *,
+        page_size: int = 100,
+        label: str,
+    ) -> list[dict[str, Any]]:
+        """Query all pages from a Notion database with pagination."""
         if page_size > 100:
             logger.warning(
                 f"Page size {page_size} exceeds Notion API limit of 100, using 100"
@@ -280,9 +326,7 @@ class NotionClient:
         start_cursor: str | None = None
         page_num = 0
 
-        logger.info(
-            f"Querying all Gastos from database {self.settings.gastos_database_id}"
-        )
+        logger.info(f"Querying all {label} pages from database {database_id}")
 
         while has_more:
             page_num += 1
@@ -291,13 +335,13 @@ class NotionClient:
                 body["start_cursor"] = start_cursor
 
             response = await self.client.post(
-                f"/databases/{self.settings.gastos_database_id}/query",
+                f"/databases/{database_id}/query",
                 json=body,
             )
 
             if response.status_code != 200:
                 raise NotionClientError(
-                    f"Failed to query Gastos database (page {page_num}): "
+                    f"Failed to query {label} database (page {page_num}): "
                     f"{response.text}",
                     status_code=response.status_code,
                 )
@@ -307,14 +351,14 @@ class NotionClient:
             all_results.extend(page_results)
 
             logger.info(
-                f"Fetched page {page_num} with {len(page_results)} Gastos, "
+                f"Fetched page {page_num} with {len(page_results)} {label}, "
                 f"total so far: {len(all_results)}"
             )
 
             has_more = data.get("has_more", False)
             start_cursor = data.get("next_cursor")
 
-        logger.info(f"Finished querying Gastos: {len(all_results)} total records")
+        logger.info(f"Finished querying {label}: {len(all_results)} total records")
         return all_results
 
     async def create_gasto_page(

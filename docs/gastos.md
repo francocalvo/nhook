@@ -81,6 +81,7 @@ The gastos feature provides local SQLite storage for Notion Gastos entries with 
 | **Amount** | number | `amount` | Float value |
 | **Date** | date | `date` | Extract start date, format as YYYY-MM-DD |
 | **Payment Method** | select | `payment_method` | Select name value |
+| **Persona** | multi_select/select | `persona` | Comma-separated if multiple values |
 
 ### Property Extraction Details
 
@@ -106,7 +107,9 @@ The gastos feature provides local SQLite storage for Notion Gastos entries with 
 - Uses `select["name"]` value
 - Returns `None` if property is missing or null
 
-## Workflow: gastos-sync
+## Gastos Workflows
+
+### gastos-sync Workflow
 
 The `gastos-sync` workflow syncs Notion Gastos entries to the local SQLite database in real-time.
 
@@ -161,9 +164,9 @@ async def _handle_delete(self, page_id: str) -> dict[str, Any]:
 - Failures are logged to `fail_log` table with retry count
 - Returns success/failure status to webhook caller
 
-## Service: GastosReloadService
+## REST API: Gastos CRUD
 
-The `GastosReloadService` provides manual full/incremental reload from Notion API.
+The gastos feature provides REST API endpoints for creating gastos in Notion and querying gastos from local SQLite database.
 
 ### Features
 
@@ -252,6 +255,230 @@ Get status of a reload job.
 }
 ```
 
+## REST API: Gastos CRUD
+
+The gastos feature provides REST API endpoints for creating gastos in Notion and querying gastos from the local SQLite database.
+
+### POST /api/gastos
+
+Create a new gasto by writing to Notion (not SQLite).
+
+**Authentication**: Required (X-Calvo-Key)
+
+**Request Body**:
+```json
+{
+  "expense": "Lunch at restaurant",
+  "amount": 45.50,
+  "date": "2026-01-15",
+  "category": "Food",
+  "payment_method": "credit_card",
+  "persona": "John"
+}
+```
+
+**Parameters**:
+- `expense` (required): Expense description, min length 1
+- `amount` (required): Amount, must be greater than 0
+- `date` (optional): Date in YYYY-MM-DD format
+- `category` (optional): Category(s). Can be string or list of strings
+- `payment_method` (optional): Payment method
+- `persona` (optional): Persona(s). Can be string or list of strings
+
+**Response (201 Created)**:
+```json
+{
+  "page_id": "new-page-123",
+  "message": "Gasto created successfully",
+  "note": "Record will be synced to SQLite via Notion automation webhooks"
+}
+```
+
+**Notes**:
+- The gasto is created directly in Notion
+- The record will be synced to SQLite via official Notion automation webhooks
+- Use the webhook system (`gastos-sync` workflow) to ensure local sync
+
+### GET /api/gastos
+
+List and search gastos from SQLite database.
+
+**Authentication**: Required (X-Calvo-Key)
+
+**Query Parameters**:
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `q` | string | Full-text search query over description, category, persona |
+| `date_from` | string | Inclusive start date (YYYY-MM-DD) |
+| `date_to` | string | Inclusive end date (YYYY-MM-DD) |
+| `persona` | string | Filter by exact persona value |
+| `payment_method` | string | Filter by exact payment method |
+| `category` | string | Filter by category (contains) |
+| `amount_min` | float | Minimum amount |
+| `amount_max` | float | Maximum amount |
+| `sort_by` | string | Sort field (date, created_at, amount). Default: `created_at` |
+| `order` | string | Sort order (asc, desc). Default: `desc` |
+| `limit` | int | Maximum results (1-1000). Default: 100 |
+| `offset` | int | Results to skip. Default: 0 |
+
+**Response (200 OK)**:
+```json
+{
+  "results": [
+    {
+      "page_id": "test-page-1",
+      "payment_method": "credit_card",
+      "description": "Groceries",
+      "category": "Food",
+      "amount": 120.75,
+      "date": "2026-01-10",
+      "persona": "Jane",
+      "created_at": "2026-01-10T10:00:00Z",
+      "updated_at": "2026-01-10T10:00:00Z"
+    },
+    {
+      "page_id": "test-page-2",
+      "payment_method": "cash",
+      "description": "Coffee",
+      "category": "Food",
+      "amount": 4.50,
+      "date": "2026-01-11",
+      "persona": "John",
+      "created_at": "2026-01-11T08:30:00Z",
+      "updated_at": "2026-01-11T08:30:00Z"
+    }
+  ],
+  "total_count": 2
+}
+```
+
+**Examples**:
+
+Search by text:
+```bash
+curl -H "X-Calvo-Key: your-secret-key" \
+  "https://your-server.com/api/gastos?q=groceries"
+```
+
+Filter by date range:
+```bash
+curl -H "X-Calvo-Key: your-secret-key" \
+  "https://your-server.com/api/gastos?date_from=2026-01-01&date_to=2026-01-31"
+```
+
+Filter by persona:
+```bash
+curl -H "X-Calvo-Key: your-secret-key" \
+  "https://your-server.com/api/gastos?persona=John"
+```
+
+Filter by amount range:
+```bash
+curl -H "X-Calvo-Key: your-secret-key" \
+  "https://your-server.com/api/gastos?amount_min=10&amount_max=100"
+```
+
+Sort and paginate:
+```bash
+curl -H "X-Calvo-Key: your-secret-key" \
+  "https://your-server.com/api/gastos?sort_by=date&order=desc&limit=50&offset=0"
+```
+
+**Notes**:
+- Uses SQLite FTS5 for full-text search when `q` is provided
+- When using `q`, other filters (date_from, date_to, persona, payment_method, category, amount_min, amount_max) are ignored
+- `total_count` reflects the number of results returned (not total matching records)
+
+### GET /api/gastos/{page_id}
+
+Get a single gasto by page_id from SQLite database.
+
+**Authentication**: Required (X-Calvo-Key)
+
+**Path Parameters**:
+- `page_id`: The Notion page ID
+
+**Response (200 OK)**:
+```json
+{
+  "page_id": "test-page-123",
+  "payment_method": "credit_card",
+  "description": "Lunch at restaurant",
+  "category": "Food",
+  "amount": 45.50,
+  "date": "2026-01-15",
+  "persona": "John",
+  "created_at": "2026-01-15T12:00:00Z",
+  "updated_at": "2026-01-15T12:00:00Z"
+}
+```
+
+**Response (404 Not Found)**:
+```json
+{
+  "detail": "Gasto with page_id 'non-existent-page' not found"
+}
+```
+
+**Example**:
+```bash
+curl -H "X-Calvo-Key: your-secret-key" \
+  "https://your-server.com/api/gastos/test-page-123"
+```
+
+## Database Enhancements
+
+### Full-Text Search (FTS)
+
+The gastos table is now integrated with a full-text search virtual table for efficient text search.
+
+**FTS Table**: `gastos_fts`
+
+**Indexed Columns**: `description`, `category`, `persona`
+
+**Search Features**:
+- Prefix search (e.g., `"coff*"` matches "coffee", "coffee shop")
+- Phrase search (e.g., `"\"lunch at\""` matches exact phrase)
+- Boolean operators (`AND`, `OR`, `NOT`)
+- Automatic triggers keep FTS table in sync
+
+**Example Queries**:
+
+Simple search:
+```bash
+GET /api/gastos?q=groceries
+```
+
+Boolean search:
+```bash
+GET /api/gastos?q=food AND coffee
+```
+
+Prefix search:
+```bash
+GET /api/gastos?q=rest*  # Matches "restaurant", "rest"
+```
+
+### Updated Schema
+
+| Column | Type | Nullable | Description |
+|--------|------|----------|-------------|
+| `page_id` | TEXT | No | Notion page ID (sync key) |
+| `payment_method` | TEXT | Yes | Payment method (select value) |
+| `description` | TEXT | Yes | Description (from Expense property) |
+| `category` | TEXT | Yes | Category (comma-separated multi-select) |
+| `persona` | TEXT | Yes | Persona (comma-separated multi/select) |
+| `amount` | REAL | Yes | Amount |
+| `date` | DATE | Yes | Date in YYYY-MM-DD format |
+| `created_at` | TIMESTAMP | No | Creation timestamp |
+| `updated_at` | TIMESTAMP | No | Last update timestamp |
+
+**New Column**: `persona` - Stores persona information from Notion
+
+**Indexes**:
+- Primary key on `page_id` (automatic)
+- FTS table on `description`, `category`, `persona` (for full-text search)
+
 ### Reload Modes
 
 #### Full Reload
@@ -313,6 +540,7 @@ The `DatabaseClient` provides async SQLite operations with retry logic.
 - `tests/test_gastos_sync.py`: Workflow unit tests
 - `tests/test_gastos_reload.py`: Service unit tests
 - `tests/test_database.py`: Database client unit tests
+- `tests/test_api_gastos.py`: REST API endpoint tests (new)
 
 ### Running Tests
 
@@ -324,6 +552,7 @@ uv run pytest
 uv run pytest tests/test_gastos_sync.py
 uv run pytest tests/test_gastos_reload.py
 uv run pytest tests/test_database.py
+uv run pytest tests/test_api_gastos.py
 
 # Run with coverage
 uv run pytest --cov=src/notion_hook --cov-report=html
@@ -332,12 +561,15 @@ uv run pytest --cov=src/notion_hook --cov-report=html
 ### Test Coverage
 
 All gastos feature code has comprehensive test coverage:
-- Property parsing (Expense, Category, Amount, Date, Payment Method)
+- Property parsing (Expense, Category, Amount, Date, Payment Method, Persona)
 - CRUD operations (create, update, delete, list)
 - Retry logic and failure handling
 - Full and incremental reload
 - Job tracking and progress
 - Multi-select category handling (single and multiple values)
+- REST API endpoints (POST, GET list, GET single)
+- Full-text search and filtering
+- Authentication and error handling
 
 ## Configuration
 

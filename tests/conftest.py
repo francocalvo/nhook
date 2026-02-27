@@ -12,12 +12,15 @@ from httpx import Response
 
 os.environ["WEBHOOK_SECRET_KEY"] = "test-secret-key"
 os.environ["NOTION_API_TOKEN"] = "secret_test_token"
+os.environ["ATRACCIONES_DATABASE_ID"] = "test-atracciones-db-id"
+os.environ["CIUDADES_DATABASE_ID"] = "test-ciudades-db-id"
 os.environ["CRONOGRAMA_DATABASE_ID"] = "test-cronograma-db-id"
 os.environ["GASTOS_DATABASE_ID"] = "test-gastos-db-id"
 os.environ["PASAJES_DATABASE_ID"] = "test-pasajes-db-id"
 
 from notion_hook.clients.notion import NotionClient
 from notion_hook.config import Settings, clear_settings_cache
+from notion_hook.core.database import DatabaseClient
 
 
 @pytest.fixture(autouse=True)
@@ -33,6 +36,8 @@ def settings() -> Settings:
     return Settings(
         webhook_secret_key="test-secret-key",
         notion_api_token="secret_test_token",
+        atracciones_database_id="test-atracciones-db-id",
+        ciudades_database_id="test-ciudades-db-id",
         cronograma_database_id="test-cronograma-db-id",
         gastos_database_id="test-gastos-db-id",
         pasajes_database_id="test-pasajes-db-id",
@@ -56,15 +61,57 @@ def mock_notion_client(settings: Settings) -> AsyncMock:
 
 
 @pytest.fixture
+def mock_database_client(settings: Settings) -> AsyncMock:
+    """Return a mocked DatabaseClient."""
+    client = AsyncMock(spec=DatabaseClient)
+    client.settings = settings
+
+    client.get_gasto = AsyncMock(return_value=None)
+    client.create_gasto = AsyncMock(return_value=None)
+    client.update_gasto = AsyncMock(return_value=True)
+    client.delete_gasto = AsyncMock(return_value=True)
+
+    client.get_ciudad = AsyncMock(return_value=None)
+    client.create_ciudad = AsyncMock(return_value=None)
+    client.update_ciudad = AsyncMock(return_value=True)
+    client.delete_ciudad = AsyncMock(return_value=True)
+
+    client.get_cronograma = AsyncMock(return_value=None)
+    client.create_cronograma = AsyncMock(return_value=None)
+    client.update_cronograma = AsyncMock(return_value=True)
+    client.delete_cronograma = AsyncMock(return_value=True)
+
+    client.get_pasaje = AsyncMock(return_value=None)
+    client.create_pasaje = AsyncMock(return_value=None)
+    client.update_pasaje = AsyncMock(return_value=True)
+    client.delete_pasaje = AsyncMock(return_value=True)
+
+    client.get_atraccion = AsyncMock(return_value=None)
+    client.create_atraccion = AsyncMock(return_value=None)
+    client.update_atraccion = AsyncMock(return_value=True)
+    client.delete_atraccion = AsyncMock(return_value=True)
+
+    client.log_failure = AsyncMock(return_value=1)
+    return client
+
+
+@pytest.fixture
 def test_client() -> Generator[TestClient, None, None]:
     """Return a test client for the FastAPI app with mocked Notion API."""
     from notion_hook.app import app
+    from notion_hook.workflows.atracciones_db_sync import AtraccionesDbSyncWorkflow
+    from notion_hook.workflows.ciudades_sync import CiudadesSyncWorkflow
+    from notion_hook.workflows.cronograma_db_sync import CronogramaDbSyncWorkflow
     from notion_hook.workflows.cronograma_sync import CronogramaSyncWorkflow
+    from notion_hook.workflows.gastos_sync import GastosSyncWorkflow
+    from notion_hook.workflows.pasajes_db_sync import PasajesDbSyncWorkflow
     from notion_hook.workflows.registry import WorkflowRegistry
 
     test_settings = Settings(
         webhook_secret_key="test-secret-key",
         notion_api_token="secret_test_token",
+        atracciones_database_id="test-atracciones-db-id",
+        ciudades_database_id="test-ciudades-db-id",
         cronograma_database_id="test-cronograma-db-id",
         gastos_database_id="test-gastos-db-id",
         pasajes_database_id="test-pasajes-db-id",
@@ -79,13 +126,42 @@ def test_client() -> Generator[TestClient, None, None]:
     mock_client.update_pasajes_cronograma_relation = AsyncMock(return_value={})
     mock_client.update_atracciones_cronograma_relation = AsyncMock(return_value={})
 
+    mock_db = AsyncMock(spec=DatabaseClient)
+    mock_db.settings = test_settings
+    mock_db.get_gasto = AsyncMock(return_value=None)
+    mock_db.create_gasto = AsyncMock(return_value=None)
+    mock_db.update_gasto = AsyncMock(return_value=True)
+    mock_db.delete_gasto = AsyncMock(return_value=True)
+    mock_db.get_ciudad = AsyncMock(return_value=None)
+    mock_db.create_ciudad = AsyncMock(return_value=None)
+    mock_db.update_ciudad = AsyncMock(return_value=True)
+    mock_db.delete_ciudad = AsyncMock(return_value=True)
+    mock_db.get_cronograma = AsyncMock(return_value=None)
+    mock_db.create_cronograma = AsyncMock(return_value=None)
+    mock_db.update_cronograma = AsyncMock(return_value=True)
+    mock_db.delete_cronograma = AsyncMock(return_value=True)
+    mock_db.get_pasaje = AsyncMock(return_value=None)
+    mock_db.create_pasaje = AsyncMock(return_value=None)
+    mock_db.update_pasaje = AsyncMock(return_value=True)
+    mock_db.delete_pasaje = AsyncMock(return_value=True)
+    mock_db.get_atraccion = AsyncMock(return_value=None)
+    mock_db.create_atraccion = AsyncMock(return_value=None)
+    mock_db.update_atraccion = AsyncMock(return_value=True)
+    mock_db.delete_atraccion = AsyncMock(return_value=True)
+    mock_db.log_failure = AsyncMock(return_value=1)
+
     from notion_hook.workflows.atracciones_sync import AtraccionesSyncWorkflow
     from notion_hook.workflows.pasajes_sync import PasajesSyncWorkflow
 
-    registry = WorkflowRegistry(mock_client)
+    registry = WorkflowRegistry(mock_client, mock_db)
+    registry.register(CiudadesSyncWorkflow)
+    registry.register(CronogramaDbSyncWorkflow)
+    registry.register(PasajesDbSyncWorkflow)
+    registry.register(AtraccionesDbSyncWorkflow)
     registry.register(CronogramaSyncWorkflow)
     registry.register(PasajesSyncWorkflow)
     registry.register(AtraccionesSyncWorkflow)
+    registry.register(GastosSyncWorkflow)
 
     with respx.mock(assert_all_called=False) as respx_mock:
         respx_mock.post(

@@ -2,7 +2,8 @@ from __future__ import annotations
 
 import os
 import tempfile
-from collections.abc import Generator
+from collections.abc import AsyncGenerator, Generator
+from pathlib import Path
 
 import aiosqlite
 import pytest
@@ -50,7 +51,7 @@ def settings() -> Generator[Settings, None, None]:
 
 
 @pytest.fixture
-async def db_client(settings: Settings) -> DatabaseClient:
+async def db_client(settings: Settings) -> AsyncGenerator[DatabaseClient, None]:
     """Return a test database client."""
     client = DatabaseClient(settings)
     await client.initialize()
@@ -345,6 +346,1245 @@ class TestDatabaseClient:
         assert gasto is None
 
     @pytest.mark.asyncio
+    async def test_get_gastos_totals_empty(self, db_client: DatabaseClient) -> None:
+        """Test totals when database is empty returns zero-safe defaults."""
+        total, count, min_val, max_val, avg_val = await db_client.get_gastos_totals()
+        assert total == 0.0
+        assert count == 0
+        assert min_val == 0.0
+        assert max_val == 0.0
+        assert avg_val == 0.0
+
+    @pytest.mark.asyncio
+    async def test_get_gastos_totals_with_data(self, db_client: DatabaseClient) -> None:
+        """Test totals with actual data."""
+        # Create test gastos
+        gastos = [
+            Gasto(
+                page_id="total-test-1",
+                payment_method="credit_card",
+                description="Lunch",
+                category="Food",
+                amount=50.0,
+                date="2026-01-10",
+                persona="John",
+                ciudad_page_id=None,
+                ciudad=None,
+                created_at="2026-01-10T12:00:00Z",
+                updated_at="2026-01-10T12:00:00Z",
+            ),
+            Gasto(
+                page_id="total-test-2",
+                payment_method="cash",
+                description="Coffee",
+                category="Food",
+                amount=5.0,
+                date="2026-01-11",
+                persona="Jane",
+                ciudad_page_id=None,
+                ciudad=None,
+                created_at="2026-01-11T08:00:00Z",
+                updated_at="2026-01-11T08:00:00Z",
+            ),
+            Gasto(
+                page_id="total-test-3",
+                payment_method="debit_card",
+                description="Dinner",
+                category="Food",
+                amount=45.0,
+                date="2026-01-12",
+                persona="John",
+                ciudad_page_id=None,
+                ciudad=None,
+                created_at="2026-01-12T19:00:00Z",
+                updated_at="2026-01-12T19:00:00Z",
+            ),
+        ]
+
+        for gasto in gastos:
+            await db_client.create_gasto(gasto)
+
+        total, count, min_val, max_val, avg_val = await db_client.get_gastos_totals()
+        assert total == 100.0  # 50 + 5 + 45
+        assert count == 3
+        assert min_val == 5.0
+        assert max_val == 50.0
+        assert avg_val == pytest.approx(33.33, rel=0.01)
+
+    @pytest.mark.asyncio
+    async def test_get_gastos_totals_with_filters(
+        self, db_client: DatabaseClient
+    ) -> None:
+        """Test totals with all filter types."""
+        # Create test gastos with different values
+        gastos = [
+            Gasto(
+                page_id="filter-test-1",
+                payment_method="credit_card",
+                description="Restaurant lunch",
+                category="Food",
+                amount=60.0,
+                date="2026-01-15",
+                persona="John",
+                ciudad_page_id=None,
+                ciudad="Rome",
+                created_at="2026-01-15T12:00:00Z",
+                updated_at="2026-01-15T12:00:00Z",
+            ),
+            Gasto(
+                page_id="filter-test-2",
+                payment_method="cash",
+                description="Coffee shop",
+                category="Food, Drinks",
+                amount=8.0,
+                date="2026-01-16",
+                persona="Jane",
+                ciudad_page_id=None,
+                ciudad="Paris",
+                created_at="2026-01-16T09:00:00Z",
+                updated_at="2026-01-16T09:00:00Z",
+            ),
+            Gasto(
+                page_id="filter-test-3",
+                payment_method="credit_card",
+                description="Uber ride",
+                category="Transport",
+                amount=25.0,
+                date="2026-01-20",
+                persona="John",
+                ciudad_page_id=None,
+                ciudad="Rome",
+                created_at="2026-01-20T14:00:00Z",
+                updated_at="2026-01-20T14:00:00Z",
+            ),
+        ]
+
+        for gasto in gastos:
+            await db_client.create_gasto(gasto)
+
+        # Test filtering by persona
+        total, count, _, _, _ = await db_client.get_gastos_totals(persona="John")
+        assert count == 2  # filter-test-1 and filter-test-3
+        assert total == 85.0  # 60 + 25
+
+        # Test filtering by payment method
+        total, count, _, _, _ = await db_client.get_gastos_totals(
+            payment_method="credit_card"
+        )
+        assert count == 2  # filter-test-1 and filter-test-3
+        assert total == 85.0
+
+        # Test filtering by category (contains)
+        total, count, _, _, _ = await db_client.get_gastos_totals(category="Food")
+        assert (
+            count == 2
+        )  # filter-test-1 and filter-test-2 (both have Food in category)
+
+        # Test filtering by ciudad
+        total, count, _, _, _ = await db_client.get_gastos_totals(ciudad="Rome")
+        assert count == 2  # filter-test-1 and filter-test-3
+
+        # Test date range filter
+        total, count, _, _, _ = await db_client.get_gastos_totals(
+            date_from="2026-01-15", date_to="2026-01-16"
+        )
+        assert count == 2  # filter-test-1 and filter-test-2
+
+        # Test amount range filter
+        total, count, _, _, _ = await db_client.get_gastos_totals(
+            amount_min=10.0, amount_max=50.0
+        )
+        # Only filter-test-3 (25.0) is in range [10, 50]
+        assert count == 1
+
+    @pytest.mark.asyncio
+    async def test_get_gastos_totals_combined_filters(
+        self, db_client: DatabaseClient
+    ) -> None:
+        """Test that all filters combine correctly."""
+        # Note: FTS (q parameter) is tested separately in
+        # test_get_gastos_totals_fts_with_structured_filters
+        gastos = [
+            Gasto(
+                page_id="combine-test-1",
+                payment_method="credit_card",
+                description="Restaurant dinner",
+                category="Food",
+                amount=80.0,
+                date="2026-01-10",
+                persona="John",
+                ciudad_page_id=None,
+                ciudad="Rome",
+                created_at="2026-01-10T19:00:00Z",
+                updated_at="2026-01-10T19:00:00Z",
+            ),
+            Gasto(
+                page_id="combine-test-2",
+                payment_method="credit_card",
+                description="Restaurant lunch",
+                category="Food",
+                amount=40.0,
+                date="2026-01-11",
+                persona="Jane",
+                ciudad_page_id=None,
+                ciudad="Rome",
+                created_at="2026-01-11T12:00:00Z",
+                updated_at="2026-01-11T12:00:00Z",
+            ),
+            Gasto(
+                page_id="combine-test-3",
+                payment_method="cash",
+                description="Restaurant breakfast",
+                category="Food",
+                amount=20.0,
+                date="2026-01-12",
+                persona="John",
+                ciudad_page_id=None,
+                ciudad="Paris",
+                created_at="2026-01-12T08:00:00Z",
+                updated_at="2026-01-12T08:00:00Z",
+            ),
+        ]
+
+        for gasto in gastos:
+            await db_client.create_gasto(gasto)
+
+        # Test combining multiple filters
+        total, count, _, _, _ = await db_client.get_gastos_totals(
+            persona="John",
+            payment_method="credit_card",
+        )
+        assert count == 1  # only combine-test-1 matches both
+        assert total == 80.0
+
+        # Test combining persona + ciudad + date range
+        total, count, _, _, _ = await db_client.get_gastos_totals(
+            persona="John",
+            ciudad="Rome",
+            date_from="2026-01-10",
+            date_to="2026-01-10",
+        )
+        assert count == 1  # only combine-test-1 matches all
+        assert total == 80.0
+
+        # Test combining payment_method + category + amount range
+        total, count, _, _, _ = await db_client.get_gastos_totals(
+            payment_method="credit_card",
+            category="Food",
+            amount_min=50.0,
+        )
+        assert count == 1  # only combine-test-1 (80) >= 50 with credit_card and Food
+        assert total == 80.0
+
+    @pytest.mark.asyncio
+    async def test_get_gastos_totals_fts_with_structured_filters(
+        self, db_client: DatabaseClient
+    ) -> None:
+        """Test FTS (q param) combines with structured filters using AND."""
+        gastos = [
+            Gasto(
+                page_id="fts-test-1",
+                payment_method="credit_card",
+                description="Restaurant dinner in Rome",
+                category="Food",
+                amount=80.0,
+                date="2026-01-10",
+                persona="John",
+                ciudad_page_id=None,
+                ciudad="Rome",
+                created_at="2026-01-10T19:00:00Z",
+                updated_at="2026-01-10T19:00:00Z",
+            ),
+            Gasto(
+                page_id="fts-test-2",
+                payment_method="credit_card",
+                description="Restaurant lunch in Rome",
+                category="Food",
+                amount=40.0,
+                date="2026-01-11",
+                persona="Jane",
+                ciudad_page_id=None,
+                ciudad="Rome",
+                created_at="2026-01-11T12:00:00Z",
+                updated_at="2026-01-11T12:00:00Z",
+            ),
+            Gasto(
+                page_id="fts-test-3",
+                payment_method="cash",
+                description="Restaurant breakfast in Paris",
+                category="Food",
+                amount=20.0,
+                date="2026-01-12",
+                persona="John",
+                ciudad_page_id=None,
+                ciudad="Paris",
+                created_at="2026-01-12T08:00:00Z",
+                updated_at="2026-01-12T08:00:00Z",
+            ),
+            Gasto(
+                page_id="fts-test-4",
+                payment_method="cash",
+                description="Coffee shop",
+                category="Drinks",
+                amount=5.0,
+                date="2026-01-13",
+                persona="John",
+                ciudad_page_id=None,
+                ciudad="Rome",
+                created_at="2026-01-13T10:00:00Z",
+                updated_at="2026-01-13T10:00:00Z",
+            ),
+        ]
+
+        for gasto in gastos:
+            await db_client.create_gasto(gasto)
+
+        # Test 1: FTS only - all "Restaurant" entries
+        total, count, _, _, _ = await db_client.get_gastos_totals(q="Restaurant")
+        assert count == 3  # fts-test-1, fts-test-2, fts-test-3
+        assert total == 140.0  # 80 + 40 + 20
+
+        # Test 2: FTS + persona filter (AND semantics)
+        total, count, _, _, _ = await db_client.get_gastos_totals(
+            q="Restaurant", persona="John"
+        )
+        assert count == 2  # fts-test-1 (John, Rome) and fts-test-3 (John, Paris)
+        assert total == 100.0  # 80 + 20
+
+        # Test 3: FTS + ciudad filter (AND semantics)
+        total, count, _, _, _ = await db_client.get_gastos_totals(
+            q="Restaurant", ciudad="Rome"
+        )
+        assert count == 2  # fts-test-1 and fts-test-2 (both Restaurant and Rome)
+        assert total == 120.0  # 80 + 40
+
+        # Test 4: FTS + persona + ciudad + payment_method (multiple AND)
+        total, count, _, _, _ = await db_client.get_gastos_totals(
+            q="Restaurant",
+            persona="John",
+            ciudad="Rome",
+            payment_method="credit_card",
+        )
+        assert count == 1  # only fts-test-1 matches all criteria
+        assert total == 80.0
+
+        # Test 5: FTS + category filter
+        total, count, _, _, _ = await db_client.get_gastos_totals(
+            q="Restaurant", category="Food"
+        )
+        assert count == 3  # All Restaurant entries are Food
+        assert total == 140.0
+
+        # Test 6: FTS with no matches
+        total, count, _, _, _ = await db_client.get_gastos_totals(q="Nonexistent")
+        assert count == 0
+        assert total == 0.0
+
+        # Test 7: FTS + filters with no matches
+        total, count, _, _, _ = await db_client.get_gastos_totals(
+            q="Restaurant", ciudad="Berlin"
+        )
+        assert count == 0  # No Restaurant entries in Berlin
+        assert total == 0.0
+
+    @pytest.mark.asyncio
+    async def test_fts_update_removes_old_terms(
+        self, db_client: DatabaseClient
+    ) -> None:
+        """Test that updating a gasto removes old FTS terms and adds new ones."""
+        # Insert a gasto with specific terms
+        gasto = Gasto(
+            page_id="fts-update-test",
+            payment_method="credit_card",
+            description="Restaurant dinner",
+            category="Food",
+            amount=80.0,
+            date="2026-01-10",
+            persona="John",
+            ciudad_page_id=None,
+            ciudad="Rome",
+            created_at="2026-01-10T19:00:00Z",
+            updated_at="2026-01-10T19:00:00Z",
+        )
+        await db_client.create_gasto(gasto)
+
+        # Verify initial FTS indexing
+        total, count, _, _, _ = await db_client.get_gastos_totals(q="Restaurant")
+        assert count == 1
+        assert total == 80.0
+
+        # Update the gasto to change description
+        gasto.description = "Coffee shop morning"
+        gasto.category = "Drinks"
+        gasto.persona = "Jane"
+        await db_client.update_gasto(gasto)
+
+        # Old terms should no longer match
+        total, count, _, _, _ = await db_client.get_gastos_totals(q="Restaurant")
+        assert count == 0
+        assert total == 0.0
+
+        total, count, _, _, _ = await db_client.get_gastos_totals(q="Food")
+        assert count == 0
+        assert total == 0.0
+
+        total, count, _, _, _ = await db_client.get_gastos_totals(q="John")
+        assert count == 0
+        assert total == 0.0
+
+        # New terms should match
+        total, count, _, _, _ = await db_client.get_gastos_totals(q="Coffee")
+        assert count == 1
+        assert total == 80.0
+
+        total, count, _, _, _ = await db_client.get_gastos_totals(q="Drinks")
+        assert count == 1
+        assert total == 80.0
+
+        total, count, _, _, _ = await db_client.get_gastos_totals(q="Jane")
+        assert count == 1
+        assert total == 80.0
+
+    @pytest.mark.asyncio
+    async def test_fts_delete_no_stale_terms_on_rowid_reuse(
+        self, db_client: DatabaseClient
+    ) -> None:
+        """Test that deleting a gasto removes FTS terms, even with rowid reuse."""
+        # Insert a gasto with specific terms
+        gasto1 = Gasto(
+            page_id="fts-delete-test-1",
+            payment_method="credit_card",
+            description="Restaurant dinner",
+            category="Food",
+            amount=80.0,
+            date="2026-01-10",
+            persona="John",
+            ciudad_page_id=None,
+            ciudad="Rome",
+            created_at="2026-01-10T19:00:00Z",
+            updated_at="2026-01-10T19:00:00Z",
+        )
+        await db_client.create_gasto(gasto1)
+
+        # Verify initial FTS indexing
+        total, count, _, _, _ = await db_client.get_gastos_totals(q="Restaurant")
+        assert count == 1
+        assert total == 80.0
+
+        # Delete the gasto
+        await db_client.delete_gasto("fts-delete-test-1")
+
+        # Verify FTS terms are removed
+        total, count, _, _, _ = await db_client.get_gastos_totals(q="Restaurant")
+        assert count == 0
+        assert total == 0.0
+
+        # Insert a new gasto (may reuse rowid in SQLite)
+        gasto2 = Gasto(
+            page_id="fts-delete-test-2",
+            payment_method="cash",
+            description="Coffee shop",
+            category="Drinks",
+            amount=5.0,
+            date="2026-01-11",
+            persona="Jane",
+            ciudad_page_id=None,
+            ciudad="Paris",
+            created_at="2026-01-11T10:00:00Z",
+            updated_at="2026-01-11T10:00:00Z",
+        )
+        await db_client.create_gasto(gasto2)
+
+        # Old terms should still not match (no stale terms from rowid reuse)
+        total, count, _, _, _ = await db_client.get_gastos_totals(q="Restaurant")
+        assert count == 0
+        assert total == 0.0
+
+        total, count, _, _, _ = await db_client.get_gastos_totals(q="Food")
+        assert count == 0
+        assert total == 0.0
+
+        # New terms should match correctly
+        total, count, _, _, _ = await db_client.get_gastos_totals(q="Coffee")
+        assert count == 1
+        assert total == 5.0
+
+    @pytest.mark.asyncio
+    async def test_fts_backfill_legacy_rows(self, tmp_path: Path) -> None:
+        """Test that FTS is rebuilt for pre-existing gastos rows on initialization."""
+        # Create a database and insert gastos BEFORE FTS is set up
+        db_path = tmp_path / "test_fts_backfill.db"
+
+        # Create database without initializing FTS
+        conn = await aiosqlite.connect(str(db_path))
+        await conn.execute("""
+            CREATE TABLE gastos (
+                page_id TEXT PRIMARY KEY,
+                payment_method TEXT NOT NULL,
+                description TEXT NOT NULL,
+                category TEXT NOT NULL,
+                amount REAL NOT NULL,
+                date TEXT NOT NULL,
+                persona TEXT NOT NULL,
+                ciudad_page_id TEXT,
+                ciudad TEXT,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            )
+        """)
+
+        # Insert legacy gastos directly (simulating pre-FTS state)
+        await conn.execute("""
+            INSERT INTO gastos VALUES (
+                'legacy-1', 'credit_card', 'Restaurant dinner', 'Food', 80.0,
+                '2026-01-10', 'John', NULL, 'Rome',
+                '2026-01-10T19:00:00Z', '2026-01-10T19:00:00Z'
+            )
+        """)
+        await conn.execute("""
+            INSERT INTO gastos VALUES (
+                'legacy-2', 'cash', 'Coffee shop', 'Drinks', 5.0,
+                '2026-01-11', 'Jane', NULL, 'Paris',
+                '2026-01-11T10:00:00Z', '2026-01-11T10:00:00Z'
+            )
+        """)
+        await conn.commit()
+        await conn.close()
+
+        # Now initialize DatabaseClient with Settings, which should create
+        # FTS and backfill
+        settings = Settings(
+            webhook_secret_key="test-secret-key",
+            notion_api_token="secret_test_token",
+            atracciones_database_id="test-atracciones-db-id",
+            ciudades_database_id="test-ciudades-db-id",
+            cronograma_database_id="test-cronograma-db-id",
+            gastos_database_id="test-gastos-db-id",
+            pasajes_database_id="test-pasajes-db-id",
+            database_path=str(db_path),
+            debug=True,
+            max_retries=2,
+            retry_delay=0.01,
+        )
+        client = DatabaseClient(settings)
+        await client.initialize()
+
+        # Verify FTS works for legacy rows (backfill succeeded)
+        total, count, _, _, _ = await client.get_gastos_totals(q="Restaurant")
+        assert count == 1
+        assert total == 80.0
+
+        total, count, _, _, _ = await client.get_gastos_totals(q="Coffee")
+        assert count == 1
+        assert total == 5.0
+
+        # Verify combined filters work with backfilled data
+        total, count, _, _, _ = await client.get_gastos_totals(
+            q="Restaurant", persona="John"
+        )
+        assert count == 1
+        assert total == 80.0
+
+        await client.close()
+
+    @pytest.mark.asyncio
+    async def test_fts_rebuild_on_schema_upgrade(self, tmp_path: Path) -> None:
+        """Test that FTS is rebuilt when upgrading from stale index.
+
+        Simulates upgrading from an existing FTS table with stale terms
+        caused by old buggy triggers. The DatabaseClient should detect
+        the schema version mismatch and rebuild the index.
+        """
+        # Create a database with FTS and OLD buggy triggers
+        db_path = tmp_path / "test_fts_upgrade.db"
+        conn = await aiosqlite.connect(str(db_path))
+
+        # Create gastos table
+        await conn.execute("""
+            CREATE TABLE gastos (
+                page_id TEXT PRIMARY KEY,
+                payment_method TEXT NOT NULL,
+                description TEXT NOT NULL,
+                category TEXT NOT NULL,
+                amount REAL NOT NULL,
+                date TEXT NOT NULL,
+                persona TEXT NOT NULL,
+                ciudad_page_id TEXT,
+                ciudad TEXT,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            )
+        """)
+
+        # Create FTS5 virtual table
+        await conn.execute("""
+            CREATE VIRTUAL TABLE gastos_fts USING fts5(
+                description,
+                category,
+                persona,
+                content='gastos',
+                content_rowid='rowid'
+            )
+        """)
+
+        # Create OLD buggy triggers (using incorrect UPDATE/DELETE pattern)
+        await conn.execute("""
+            CREATE TRIGGER gastos_fts_insert
+            AFTER INSERT ON gastos
+            BEGIN
+                INSERT INTO gastos_fts(rowid, description, category, persona)
+                VALUES (NEW.rowid, NEW.description, NEW.category, NEW.persona);
+            END
+        """)
+
+        # OLD buggy UPDATE trigger (uses UPDATE instead of 'delete' sentinel)
+        await conn.execute("""
+            CREATE TRIGGER gastos_fts_update
+            AFTER UPDATE ON gastos
+            BEGIN
+                UPDATE gastos_fts
+                SET description = NEW.description,
+                    category = NEW.category,
+                    persona = NEW.persona
+                WHERE rowid = NEW.rowid;
+            END
+        """)
+
+        # OLD buggy DELETE trigger (uses DELETE instead of 'delete' sentinel)
+        await conn.execute("""
+            CREATE TRIGGER gastos_fts_delete
+            AFTER DELETE ON gastos
+            BEGIN
+                DELETE FROM gastos_fts WHERE rowid = OLD.rowid;
+            END
+        """)
+
+        # Set user_version to 0 (simulating pre-fix version)
+        await conn.execute("PRAGMA user_version = 0")
+
+        # Insert initial gasto
+        await conn.execute("""
+            INSERT INTO gastos VALUES (
+                'upgrade-1', 'credit_card', 'Restaurant dinner', 'Food', 80.0,
+                '2026-01-10', 'John', NULL, 'Rome',
+                '2026-01-10T19:00:00Z', '2026-01-10T19:00:00Z'
+            )
+        """)
+
+        # Update the gasto (this will cause stale term with buggy trigger)
+        await conn.execute("""
+            UPDATE gastos
+            SET description = 'Coffee shop', category = 'Drinks', amount = 5.0
+            WHERE page_id = 'upgrade-1'
+        """)
+
+        await conn.commit()
+        await conn.close()
+
+        # Now initialize DatabaseClient, which should detect schema version
+        # mismatch and rebuild FTS index
+        settings = Settings(
+            webhook_secret_key="test-secret-key",
+            notion_api_token="secret_test_token",
+            atracciones_database_id="test-atracciones-db-id",
+            ciudades_database_id="test-ciudades-db-id",
+            cronograma_database_id="test-cronograma-db-id",
+            gastos_database_id="test-gastos-db-id",
+            pasajes_database_id="test-pasajes-db-id",
+            database_path=str(db_path),
+            debug=True,
+            max_retries=2,
+            retry_delay=0.01,
+        )
+        client = DatabaseClient(settings)
+        await client.initialize()
+
+        # Verify FTS was rebuilt - old stale term should NOT match
+        total, count, _, _, _ = await client.get_gastos_totals(q="Restaurant")
+        assert count == 0  # Stale term removed
+        assert total == 0.0
+
+        # New term should match
+        total, count, _, _, _ = await client.get_gastos_totals(q="Coffee")
+        assert count == 1
+        assert total == 5.0
+
+        # Verify combined filters work with rebuilt index
+        total, count, _, _, _ = await client.get_gastos_totals(
+            q="Coffee", persona="John"
+        )
+        assert count == 1
+        assert total == 5.0
+
+        # Verify FTS schema version was updated in metadata table
+        conn = await aiosqlite.connect(str(db_path))
+        cursor = await conn.execute(
+            "SELECT value FROM schema_meta WHERE key = 'fts_version'"
+        )
+        row = await cursor.fetchone()
+        assert row is not None, "FTS version should be set in schema_meta"
+        assert row[0] == 1  # FTS_SCHEMA_VERSION
+        await conn.close()
+
+        await client.close()
+
+    @pytest.mark.asyncio
+    async def test_get_gastos_totals_negative_values(
+        self, db_client: DatabaseClient
+    ) -> None:
+        """Test totals with negative amounts (refunds/adjustments)."""
+        gastos = [
+            Gasto(
+                page_id="negative-test-1",
+                payment_method="credit_card",
+                description="Purchase",
+                category="Shopping",
+                amount=100.0,
+                date="2026-01-10",
+                persona="John",
+                ciudad_page_id=None,
+                ciudad=None,
+                created_at="2026-01-10T12:00:00Z",
+                updated_at="2026-01-10T12:00:00Z",
+            ),
+            Gasto(
+                page_id="negative-test-2",
+                payment_method="credit_card",
+                description="Refund",
+                category="Shopping",
+                amount=-30.0,
+                date="2026-01-11",
+                persona="John",
+                ciudad_page_id=None,
+                ciudad=None,
+                created_at="2026-01-11T12:00:00Z",
+                updated_at="2026-01-11T12:00:00Z",
+            ),
+        ]
+
+        for gasto in gastos:
+            await db_client.create_gasto(gasto)
+
+        total, count, min_val, max_val, avg_val = await db_client.get_gastos_totals()
+        assert total == 70.0  # 100 - 30
+        assert count == 2
+        assert min_val == -30.0
+        assert max_val == 100.0
+        assert avg_val == 35.0  # (100 - 30) / 2
+
+    # ========================================
+    # Summary Tests (Step 5: Single-dimension)
+    # ========================================
+
+    @pytest.mark.asyncio
+    async def test_get_gastos_summary_empty(self, db_client: DatabaseClient) -> None:
+        """Test summary when database is empty returns zero-safe defaults."""
+        groups, grand_total, total_count = await db_client.get_gastos_summary(
+            group_by=["category"]
+        )
+        assert groups == []
+        assert grand_total == 0.0
+        assert total_count == 0
+
+    @pytest.mark.asyncio
+    async def test_get_gastos_summary_no_group_by(
+        self, db_client: DatabaseClient
+    ) -> None:
+        """Test summary without group_by returns empty groups with totals."""
+        # Insert test data
+        gasto = Gasto(
+            page_id="summary-no-group",
+            payment_method="credit_card",
+            description="Test expense",
+            category="Food",
+            amount=100.0,
+            date="2026-01-15",
+            persona="John",
+            ciudad_page_id=None,
+            ciudad="Rome",
+            created_at="2026-01-15T12:00:00Z",
+            updated_at="2026-01-15T12:00:00Z",
+        )
+        await db_client.create_gasto(gasto)
+
+        groups, grand_total, total_count = await db_client.get_gastos_summary(
+            group_by=[]
+        )
+        assert groups == []
+        assert grand_total == 100.0
+        assert total_count == 1
+
+    @pytest.mark.asyncio
+    async def test_get_gastos_summary_by_category(
+        self, db_client: DatabaseClient
+    ) -> None:
+        """Test summary grouped by category."""
+        gastos = [
+            Gasto(
+                page_id="summary-cat-1",
+                payment_method="credit_card",
+                description="Lunch",
+                category="Food",
+                amount=50.0,
+                date="2026-01-10",
+                persona="John",
+                ciudad_page_id=None,
+                ciudad="Rome",
+                created_at="2026-01-10T12:00:00Z",
+                updated_at="2026-01-10T12:00:00Z",
+            ),
+            Gasto(
+                page_id="summary-cat-2",
+                payment_method="cash",
+                description="Dinner",
+                category="Food",
+                amount=75.0,
+                date="2026-01-11",
+                persona="Jane",
+                ciudad_page_id=None,
+                ciudad="Rome",
+                created_at="2026-01-11T19:00:00Z",
+                updated_at="2026-01-11T19:00:00Z",
+            ),
+            Gasto(
+                page_id="summary-cat-3",
+                payment_method="debit_card",
+                description="Uber",
+                category="Transport",
+                amount=25.0,
+                date="2026-01-12",
+                persona="John",
+                ciudad_page_id=None,
+                ciudad="Madrid",
+                created_at="2026-01-12T14:00:00Z",
+                updated_at="2026-01-12T14:00:00Z",
+            ),
+        ]
+
+        for gasto in gastos:
+            await db_client.create_gasto(gasto)
+
+        groups, grand_total, total_count = await db_client.get_gastos_summary(
+            group_by=["category"]
+        )
+
+        assert len(groups) == 2
+        assert grand_total == 150.0  # 50 + 75 + 25
+        assert total_count == 3
+
+        # Find Food group (sorted by total DESC, so Food should be first)
+        food_group = next((g for g in groups if g["key"]["category"] == "Food"), None)
+        assert food_group is not None
+        assert food_group["total"] == 125.0  # 50 + 75
+        assert food_group["count"] == 2
+
+        # Find Transport group
+        transport_group = next(
+            (g for g in groups if g["key"]["category"] == "Transport"), None
+        )
+        assert transport_group is not None
+        assert transport_group["total"] == 25.0
+        assert transport_group["count"] == 1
+
+    @pytest.mark.asyncio
+    async def test_get_gastos_summary_by_persona(
+        self, db_client: DatabaseClient
+    ) -> None:
+        """Test summary grouped by persona."""
+        gastos = [
+            Gasto(
+                page_id="summary-per-1",
+                payment_method="credit_card",
+                description="Lunch",
+                category="Food",
+                amount=60.0,
+                date="2026-01-10",
+                persona="Franco",
+                ciudad_page_id=None,
+                ciudad="Rome",
+                created_at="2026-01-10T12:00:00Z",
+                updated_at="2026-01-10T12:00:00Z",
+            ),
+            Gasto(
+                page_id="summary-per-2",
+                payment_method="cash",
+                description="Dinner",
+                category="Food",
+                amount=40.0,
+                date="2026-01-11",
+                persona="Mica",
+                ciudad_page_id=None,
+                ciudad="Rome",
+                created_at="2026-01-11T19:00:00Z",
+                updated_at="2026-01-11T19:00:00Z",
+            ),
+        ]
+
+        for gasto in gastos:
+            await db_client.create_gasto(gasto)
+
+        groups, grand_total, total_count = await db_client.get_gastos_summary(
+            group_by=["persona"]
+        )
+
+        assert len(groups) == 2
+        assert grand_total == 100.0
+        assert total_count == 2
+
+        # Check that Franco has higher total (sorted DESC by total)
+        franco_group = next(
+            (g for g in groups if g["key"]["persona"] == "Franco"), None
+        )
+        assert franco_group is not None
+        assert franco_group["total"] == 60.0
+        assert franco_group["count"] == 1
+
+    @pytest.mark.asyncio
+    async def test_get_gastos_summary_by_date(self, db_client: DatabaseClient) -> None:
+        """Test summary grouped by date (day-level, sorted ASC)."""
+        gastos = [
+            Gasto(
+                page_id="summary-date-1",
+                payment_method="credit_card",
+                description="Lunch",
+                category="Food",
+                amount=50.0,
+                date="2026-01-15",
+                persona="John",
+                ciudad_page_id=None,
+                ciudad="Rome",
+                created_at="2026-01-15T12:00:00Z",
+                updated_at="2026-01-15T12:00:00Z",
+            ),
+            Gasto(
+                page_id="summary-date-2",
+                payment_method="cash",
+                description="Dinner",
+                category="Food",
+                amount=75.0,
+                date="2026-01-16",
+                persona="Jane",
+                ciudad_page_id=None,
+                ciudad="Rome",
+                created_at="2026-01-16T19:00:00Z",
+                updated_at="2026-01-16T19:00:00Z",
+            ),
+            Gasto(
+                page_id="summary-date-3",
+                payment_method="debit_card",
+                description="Coffee",
+                category="Food",
+                amount=10.0,
+                date="2026-01-14",
+                persona="John",
+                ciudad_page_id=None,
+                ciudad="Rome",
+                created_at="2026-01-14T10:00:00Z",
+                updated_at="2026-01-14T10:00:00Z",
+            ),
+        ]
+
+        for gasto in gastos:
+            await db_client.create_gasto(gasto)
+
+        groups, grand_total, total_count = await db_client.get_gastos_summary(
+            group_by=["date"]
+        )
+
+        assert len(groups) == 3
+        assert grand_total == 135.0  # 50 + 75 + 10
+        assert total_count == 3
+
+        # Verify ascending date order
+        assert groups[0]["key"]["date"] == "2026-01-14"
+        assert groups[0]["total"] == 10.0
+        assert groups[1]["key"]["date"] == "2026-01-15"
+        assert groups[1]["total"] == 50.0
+        assert groups[2]["key"]["date"] == "2026-01-16"
+        assert groups[2]["total"] == 75.0
+
+    @pytest.mark.asyncio
+    async def test_get_gastos_summary_by_ciudad(
+        self, db_client: DatabaseClient
+    ) -> None:
+        """Test summary grouped by city."""
+        gastos = [
+            Gasto(
+                page_id="summary-city-1",
+                payment_method="credit_card",
+                description="Lunch",
+                category="Food",
+                amount=100.0,
+                date="2026-01-10",
+                persona="John",
+                ciudad_page_id=None,
+                ciudad="Rome",
+                created_at="2026-01-10T12:00:00Z",
+                updated_at="2026-01-10T12:00:00Z",
+            ),
+            Gasto(
+                page_id="summary-city-2",
+                payment_method="cash",
+                description="Dinner",
+                category="Food",
+                amount=80.0,
+                date="2026-01-11",
+                persona="Jane",
+                ciudad_page_id=None,
+                ciudad="Madrid",
+                created_at="2026-01-11T19:00:00Z",
+                updated_at="2026-01-11T19:00:00Z",
+            ),
+        ]
+
+        for gasto in gastos:
+            await db_client.create_gasto(gasto)
+
+        groups, grand_total, total_count = await db_client.get_gastos_summary(
+            group_by=["ciudad"]
+        )
+
+        assert len(groups) == 2
+        assert grand_total == 180.0
+        assert total_count == 2
+
+        # Find Rome group (higher total, should be first due to DESC sort)
+        rome_group = next((g for g in groups if g["key"]["ciudad"] == "Rome"), None)
+        assert rome_group is not None
+        assert rome_group["total"] == 100.0
+        assert rome_group["count"] == 1
+
+    @pytest.mark.asyncio
+    async def test_get_gastos_summary_unknown_value(
+        self, db_client: DatabaseClient
+    ) -> None:
+        """Test that missing values are grouped as 'Unknown'."""
+        gastos = [
+            Gasto(
+                page_id="summary-unknown-1",
+                payment_method="credit_card",
+                description="Lunch",
+                category="Food",
+                amount=50.0,
+                date="2026-01-10",
+                persona="John",
+                ciudad_page_id=None,
+                ciudad="Rome",
+                created_at="2026-01-10T12:00:00Z",
+                updated_at="2026-01-10T12:00:00Z",
+            ),
+            Gasto(
+                page_id="summary-unknown-2",
+                payment_method="cash",
+                description="Mystery expense",
+                category=None,  # Missing category
+                amount=30.0,
+                date="2026-01-11",
+                persona="Jane",
+                ciudad_page_id=None,
+                ciudad=None,  # Missing ciudad
+                created_at="2026-01-11T14:00:00Z",
+                updated_at="2026-01-11T14:00:00Z",
+            ),
+        ]
+
+        for gasto in gastos:
+            await db_client.create_gasto(gasto)
+
+        # Test category grouping with Unknown
+        groups, grand_total, total_count = await db_client.get_gastos_summary(
+            group_by=["category"]
+        )
+
+        assert len(groups) == 2
+        unknown_group = next(
+            (g for g in groups if g["key"]["category"] == "Unknown"), None
+        )
+        assert unknown_group is not None
+        assert unknown_group["total"] == 30.0
+        assert unknown_group["count"] == 1
+
+        # Test ciudad grouping with Unknown
+        groups, grand_total, total_count = await db_client.get_gastos_summary(
+            group_by=["ciudad"]
+        )
+
+        assert len(groups) == 2
+        unknown_city = next(
+            (g for g in groups if g["key"]["ciudad"] == "Unknown"), None
+        )
+        assert unknown_city is not None
+        assert unknown_city["total"] == 30.0
+        assert unknown_city["count"] == 1
+
+    @pytest.mark.asyncio
+    async def test_get_gastos_summary_with_filters(
+        self, db_client: DatabaseClient
+    ) -> None:
+        """Test summary with all filter parameters."""
+        gastos = [
+            Gasto(
+                page_id="summary-filter-1",
+                payment_method="credit_card",
+                description="Restaurant dinner in Rome",
+                category="Food",
+                amount=80.0,
+                date="2026-01-10",
+                persona="John",
+                ciudad_page_id=None,
+                ciudad="Rome",
+                created_at="2026-01-10T19:00:00Z",
+                updated_at="2026-01-10T19:00:00Z",
+            ),
+            Gasto(
+                page_id="summary-filter-2",
+                payment_method="credit_card",
+                description="Restaurant lunch in Rome",
+                category="Food",
+                amount=40.0,
+                date="2026-01-11",
+                persona="Jane",
+                ciudad_page_id=None,
+                ciudad="Rome",
+                created_at="2026-01-11T12:00:00Z",
+                updated_at="2026-01-11T12:00:00Z",
+            ),
+            Gasto(
+                page_id="summary-filter-3",
+                payment_method="cash",
+                description="Coffee shop",
+                category="Drinks",
+                amount=10.0,
+                date="2026-01-12",
+                persona="John",
+                ciudad_page_id=None,
+                ciudad="Paris",
+                created_at="2026-01-12T10:00:00Z",
+                updated_at="2026-01-12T10:00:00Z",
+            ),
+        ]
+
+        for gasto in gastos:
+            await db_client.create_gasto(gasto)
+
+        # Test with filters
+        groups, grand_total, total_count = await db_client.get_gastos_summary(
+            group_by=["category"],
+            q="Restaurant",
+            date_from="2026-01-10",
+            date_to="2026-01-11",
+            persona="John",
+            payment_method="credit_card",
+            category="Food",
+            amount_min=50.0,
+            amount_max=100.0,
+            ciudad="Rome",
+        )
+
+        # Only summary-filter-1 matches all criteria
+        assert len(groups) == 1
+        assert groups[0]["key"]["category"] == "Food"
+        assert groups[0]["total"] == 80.0
+        assert groups[0]["count"] == 1
+        assert grand_total == 80.0
+        assert total_count == 1
+
+    @pytest.mark.asyncio
+    async def test_get_gastos_summary_fts_with_filters(
+        self, db_client: DatabaseClient
+    ) -> None:
+        """Test summary FTS (q param) combines with structured filters."""
+        gastos = [
+            Gasto(
+                page_id="summary-fts-1",
+                payment_method="credit_card",
+                description="Restaurant dinner",
+                category="Food",
+                amount=80.0,
+                date="2026-01-10",
+                persona="John",
+                ciudad_page_id=None,
+                ciudad="Rome",
+                created_at="2026-01-10T19:00:00Z",
+                updated_at="2026-01-10T19:00:00Z",
+            ),
+            Gasto(
+                page_id="summary-fts-2",
+                payment_method="cash",
+                description="Restaurant lunch",
+                category="Food",
+                amount=40.0,
+                date="2026-01-11",
+                persona="Jane",
+                ciudad_page_id=None,
+                ciudad="Paris",
+                created_at="2026-01-11T12:00:00Z",
+                updated_at="2026-01-11T12:00:00Z",
+            ),
+        ]
+
+        for gasto in gastos:
+            await db_client.create_gasto(gasto)
+
+        # Test FTS + ciudad filter
+        groups, grand_total, total_count = await db_client.get_gastos_summary(
+            group_by=["category"], q="Restaurant", ciudad="Rome"
+        )
+
+        # Only summary-fts-1 matches (Restaurant + Rome)
+        assert len(groups) == 1
+        assert grand_total == 80.0
+        assert total_count == 1
+
+    @pytest.mark.asyncio
+    async def test_get_gastos_summary_negative_values(
+        self, db_client: DatabaseClient
+    ) -> None:
+        """Test summary with negative amounts (refunds/adjustments)."""
+        gastos = [
+            Gasto(
+                page_id="summary-neg-1",
+                payment_method="credit_card",
+                description="Purchase",
+                category="Shopping",
+                amount=100.0,
+                date="2026-01-10",
+                persona="John",
+                ciudad_page_id=None,
+                ciudad="Rome",
+                created_at="2026-01-10T12:00:00Z",
+                updated_at="2026-01-10T12:00:00Z",
+            ),
+            Gasto(
+                page_id="summary-neg-2",
+                payment_method="credit_card",
+                description="Refund",
+                category="Shopping",
+                amount=-30.0,
+                date="2026-01-11",
+                persona="John",
+                ciudad_page_id=None,
+                ciudad="Rome",
+                created_at="2026-01-11T12:00:00Z",
+                updated_at="2026-01-11T12:00:00Z",
+            ),
+        ]
+
+        for gasto in gastos:
+            await db_client.create_gasto(gasto)
+
+        groups, grand_total, total_count = await db_client.get_gastos_summary(
+            group_by=["category"]
+        )
+
+        assert len(groups) == 1
+        assert groups[0]["key"]["category"] == "Shopping"
+        assert groups[0]["total"] == 70.0  # 100 - 30
+        assert groups[0]["count"] == 2
+        assert grand_total == 70.0
+        assert total_count == 2
+
+    @pytest.mark.asyncio
     async def test_ciudad_crud(self, db_client: DatabaseClient) -> None:
         """Test create/get/update/delete for ciudades."""
         ciudad = Ciudad(
@@ -577,6 +1817,7 @@ class TestDatabaseClient:
         # Verify child was inserted
         async with db_client.conn.execute("SELECT COUNT(*) FROM test_child") as cursor:
             row = await cursor.fetchone()
+            assert row is not None
             assert row[0] == 1
 
         # Try to insert child with invalid parent reference
@@ -603,6 +1844,7 @@ class TestDatabaseClient:
         # Verify child was NOT inserted
         async with db_client.conn.execute("SELECT COUNT(*) FROM test_child") as cursor:
             row = await cursor.fetchone()
+            assert row is not None
             assert row[0] == 1  # Only the valid child exists
 
         # Cleanup test tables
@@ -947,7 +2189,7 @@ class TestDatabaseClient:
             # Verify FK constraint doesn't exist
             async with conn.execute("PRAGMA foreign_key_list(gastos)") as cursor:
                 rows = await cursor.fetchall()
-                assert len(rows) == 0
+                assert len(list(rows)) == 0
 
         # Initialize database client (should run migration and add FK constraint)
         async with DatabaseClient(settings) as client:

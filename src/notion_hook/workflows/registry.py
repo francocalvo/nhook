@@ -67,7 +67,7 @@ class WorkflowRegistry:
         )
 
         if accepts_db:
-            workflow = workflow_class(self.notion_client, self.database_client)
+            workflow = workflow_class(self.notion_client, self.database_client)  # type: ignore[call-arg]
         else:
             workflow = workflow_class(self.notion_client)
         self._workflows.append(workflow)

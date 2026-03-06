@@ -4,6 +4,7 @@ from unittest.mock import AsyncMock
 
 import pytest
 
+from notion_hook.models.gastos import Gasto
 from notion_hook.models.notion_db import Ciudad
 from notion_hook.services.notion_reload import (
     JobStatus,
@@ -178,7 +179,7 @@ async def test_execute_full_reload_resolves_gasto_ciudad_name() -> None:
     )
 
     async def _sync_gastos(
-        rows: list[object], *, update_if_changed: bool
+        rows: list[Gasto], *, update_if_changed: bool
     ) -> tuple[int, int, int, int]:
         assert len(rows) == 1
         assert rows[0].ciudad_page_id == "city-1"

@@ -8,6 +8,14 @@ from pydantic import BaseModel, Field
 from notion_hook.core.auth import verify_webhook_key
 from notion_hook.core.database import DatabaseClient
 from notion_hook.core.logging import get_logger
+from notion_hook.models.gastos_aggregates import (
+    AggregateFilters,
+    GastoSummaryGroup,
+    GastoSummaryResponse,
+    GastoTotalsResponse,
+    get_aggregate_filters,
+    get_group_by,
+)
 
 logger = get_logger("api.gastos")
 
@@ -227,6 +235,163 @@ async def list_gastos(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to list gastos: {e}",
+        ) from e
+
+
+@router.get("/totals", response_model=GastoTotalsResponse)
+async def get_gastos_totals(
+    db: Annotated[DatabaseClient, Depends(get_database_client)],
+    _: Annotated[str, Depends(verify_webhook_key)] = "",
+    filters: AggregateFilters = Depends(get_aggregate_filters),
+) -> GastoTotalsResponse:
+    """Get aggregate totals for gastos.
+
+    This endpoint returns aggregate metrics (total, count, min, max, avg)
+    for all gastos matching the provided filters.
+
+    Unlike the list endpoint, aggregate endpoints combine ALL filters together,
+    including FTS (q) and structured filters.
+
+    Args:
+        db: The database client (from dependency).
+        _: The validated webhook key (from dependency).
+        filters: Validated aggregate filters (from dependency).
+
+    Returns:
+        Aggregate totals for the filtered result set.
+
+    Raises:
+        HTTPException: If query fails or authentication error.
+    """
+    try:
+        total, count, min_val, max_val, avg_val = await db.get_gastos_totals(
+            q=filters.q,
+            date_from=filters.date_from,
+            date_to=filters.date_to,
+            persona=filters.persona,
+            payment_method=filters.payment_method,
+            category=filters.category,
+            amount_min=filters.amount_min,
+            amount_max=filters.amount_max,
+            ciudad=filters.ciudad,
+        )
+
+        logger.info(
+            f"Computed gastos totals: q={filters.q}, "
+            f"filters={{date_from={filters.date_from}, date_to={filters.date_to}, "
+            f"persona={filters.persona}, payment_method={filters.payment_method}, "
+            f"category={filters.category}, ciudad={filters.ciudad}}}, "
+            f"result={{total={total}, count={count}}}"
+        )
+
+        return GastoTotalsResponse(
+            total=total,
+            count=count,
+            min=min_val,
+            max=max_val,
+            avg=avg_val,
+        )
+
+    except Exception as e:
+        logger.error(f"Failed to get gastos totals: {e}", exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to get gastos totals: {e}",
+        ) from e
+
+
+@router.get("/summary", response_model=GastoSummaryResponse)
+async def get_gastos_summary(
+    db: Annotated[DatabaseClient, Depends(get_database_client)],
+    _: Annotated[str, Depends(verify_webhook_key)] = "",
+    filters: AggregateFilters = Depends(get_aggregate_filters),
+    group_by: list[str] = Depends(get_group_by),
+) -> GastoSummaryResponse:
+    """Get grouped summary for gastos.
+
+    This endpoint returns grouped aggregates (total, count) for all gastos
+    matching the provided filters, grouped by the specified dimension(s).
+
+    Unlike the list endpoint, aggregate endpoints combine ALL filters together,
+    including FTS (q) and structured filters.
+
+    **Step 5**: Single-dimension grouping only (no exploded grouping yet).
+    Multi-dimension grouping and exploded category/persona will be in Step 6.
+
+    **Grouping dimensions**:
+    - `category`: Group by category (no explosion in Step 5)
+    - `persona`: Group by persona (no explosion in Step 5)
+    - `date`: Group by date (day-level granularity)
+    - `ciudad`: Group by city
+
+    **Sorting**:
+    - Date groups: sorted ascending by date
+    - Other groups: sorted descending by total
+
+    **Missing values**: Grouped under "Unknown"
+
+    **Note on exploded grouping** (Step 6):
+    When grouping by category or persona in Step 6, multi-value fields will
+    be split and a single gasto can contribute to multiple groups. This means
+    the sum of group totals/counts may exceed grand_total/total_count.
+
+    Args:
+        db: The database client (from dependency).
+        _: The validated webhook key (from dependency).
+        filters: Validated aggregate filters (from dependency).
+        group_by: Validated grouping dimensions (from dependency).
+
+    Returns:
+        Grouped summary with grand totals from the filtered base set.
+
+    Raises:
+        HTTPException: If query fails or authentication error.
+    """
+    try:
+        groups, grand_total, total_count = await db.get_gastos_summary(
+            group_by=group_by,
+            q=filters.q,
+            date_from=filters.date_from,
+            date_to=filters.date_to,
+            persona=filters.persona,
+            payment_method=filters.payment_method,
+            category=filters.category,
+            amount_min=filters.amount_min,
+            amount_max=filters.amount_max,
+            ciudad=filters.ciudad,
+        )
+
+        logger.info(
+            f"Computed gastos summary: q={filters.q}, "
+            f"filters={{date_from={filters.date_from}, date_to={filters.date_to}, "
+            f"persona={filters.persona}, payment_method={filters.payment_method}, "
+            f"category={filters.category}, ciudad={filters.ciudad}}}, "
+            f"group_by={group_by}, "
+            f"result={{groups={len(groups)}, grand_total={grand_total}, "
+            f"total_count={total_count}}}"
+        )
+
+        # Convert dict groups to GastoSummaryGroup objects
+        summary_groups = [
+            GastoSummaryGroup(
+                key=group["key"],
+                total=group["total"],
+                count=group["count"],
+            )
+            for group in groups
+        ]
+
+        return GastoSummaryResponse(
+            groups=summary_groups,
+            grand_total=grand_total,
+            total_count=total_count,
+        )
+
+    except Exception as e:
+        logger.error(f"Failed to get gastos summary: {e}", exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to get gastos summary: {e}",
         ) from e
 
 

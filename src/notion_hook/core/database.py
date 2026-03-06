@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import asyncio
 from collections.abc import Awaitable, Callable, Sequence
-from typing import ParamSpec, TypeVar
+from typing import Any, ParamSpec, TypeVar
 
 import aiosqlite
 
@@ -100,6 +100,7 @@ class DatabaseClient:
         """
         )
         await self._ensure_gastos_schema()
+        await self._ensure_gastos_fts()
         await self.conn.execute(
             """
             CREATE TABLE IF NOT EXISTS cronograma (
@@ -259,6 +260,153 @@ class DatabaseClient:
             await self.conn.execute("DROP TABLE gastos")
             await self.conn.execute("ALTER TABLE gastos_new RENAME TO gastos")
             await self.conn.commit()
+
+    async def _ensure_schema_meta_table(self) -> None:
+        """Ensure schema_meta table exists for feature-specific versioning.
+
+        This table stores schema versions for individual features (like FTS)
+        without clobbering the global database user_version pragma.
+        """
+        await self.conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS schema_meta (
+                key TEXT PRIMARY KEY,
+                value INTEGER NOT NULL
+            )
+        """
+        )
+
+    async def _get_schema_version(self, key: str) -> int:
+        """Get schema version for a specific feature.
+
+        Args:
+            key: The feature key (e.g., 'fts_version').
+
+        Returns:
+            The schema version, or 0 if not set.
+        """
+        cursor = await self.conn.execute(
+            "SELECT value FROM schema_meta WHERE key = ?", (key,)
+        )
+        row = await cursor.fetchone()
+        return row[0] if row else 0
+
+    async def _set_schema_version(self, key: str, version: int) -> None:
+        """Set schema version for a specific feature.
+
+        Args:
+            key: The feature key (e.g., 'fts_version').
+            version: The schema version number.
+        """
+        await self.conn.execute(
+            """
+            INSERT OR REPLACE INTO schema_meta (key, value)
+            VALUES (?, ?)
+        """,
+            (key, version),
+        )
+
+    async def _ensure_gastos_fts(self) -> None:
+        """Ensure FTS5 virtual table exists for full-text search on gastos.
+
+        Uses schema_meta table to track FTS schema version.
+        When upgrading, rebuilds the FTS index to ensure consistency.
+        """
+        # Ensure schema_meta table exists
+        await self._ensure_schema_meta_table()
+
+        # FTS schema version - increment when changing trigger/index semantics
+        fts_schema_version = 1
+
+        # Check current FTS schema version from metadata table
+        current_version = await self._get_schema_version("fts_version")
+
+        # Check if FTS table already exists
+        cursor = await self.conn.execute(
+            "SELECT name FROM sqlite_master WHERE type='table' AND name='gastos_fts'"
+        )
+        fts_exists = await cursor.fetchone()
+
+        # Create FTS5 virtual table if it doesn't exist
+        await self.conn.execute(
+            """
+            CREATE VIRTUAL TABLE IF NOT EXISTS gastos_fts USING fts5(
+                description,
+                category,
+                persona,
+                content='gastos',
+                content_rowid='rowid'
+            )
+        """
+        )
+
+        # Drop existing triggers (in case they were created with
+        # incorrect implementation)
+        # This ensures we always have the correct trigger definitions
+        for trigger_name in [
+            "gastos_fts_insert",
+            "gastos_fts_update",
+            "gastos_fts_delete",
+        ]:
+            await self.conn.execute(f"DROP TRIGGER IF EXISTS {trigger_name}")
+
+        # Create triggers to keep FTS in sync with gastos table
+        # For external-content FTS5 tables, we must use the 'delete' sentinel pattern
+
+        # Trigger for INSERT
+        await self.conn.execute(
+            """
+            CREATE TRIGGER gastos_fts_insert
+            AFTER INSERT ON gastos
+            BEGIN
+                INSERT INTO gastos_fts(rowid, description, category, persona)
+                VALUES (NEW.rowid, NEW.description, NEW.category, NEW.persona);
+            END
+        """
+        )
+
+        # Trigger for UPDATE - use 'delete' sentinel for OLD, then insert NEW
+        await self.conn.execute(
+            """
+            CREATE TRIGGER gastos_fts_update
+            AFTER UPDATE ON gastos
+            BEGIN
+                INSERT INTO gastos_fts
+                    (gastos_fts, rowid, description, category, persona)
+                VALUES('delete', OLD.rowid, OLD.description, OLD.category, OLD.persona);
+                INSERT INTO gastos_fts(rowid, description, category, persona)
+                VALUES (NEW.rowid, NEW.description, NEW.category, NEW.persona);
+            END
+        """
+        )
+
+        # Trigger for DELETE - use 'delete' sentinel
+        await self.conn.execute(
+            """
+            CREATE TRIGGER gastos_fts_delete
+            AFTER DELETE ON gastos
+            BEGIN
+                INSERT INTO gastos_fts
+                    (gastos_fts, rowid, description, category, persona)
+                VALUES('delete', OLD.rowid, OLD.description, OLD.category, OLD.persona);
+            END
+        """
+        )
+
+        # Rebuild FTS index if:
+        # 1. FTS table was just created (no existing data indexed)
+        # 2. Schema version is outdated (upgrading from old trigger semantics)
+        needs_rebuild = not fts_exists or current_version < fts_schema_version
+
+        if needs_rebuild:
+            await self.conn.execute(
+                "INSERT INTO gastos_fts(gastos_fts) VALUES('rebuild')"
+            )
+
+        # Update FTS schema version in metadata table
+        await self._set_schema_version("fts_version", fts_schema_version)
+
+        await self.conn.commit()
 
     async def get_gasto(self, page_id: str) -> Gasto | None:
         """Retrieve a single gasto by page_id.
@@ -1656,6 +1804,276 @@ class DatabaseClient:
                 ]
 
         return await self._retry_operation("search", _search)
+
+    async def get_gastos_totals(
+        self,
+        q: str | None = None,
+        date_from: str | None = None,
+        date_to: str | None = None,
+        persona: str | None = None,
+        payment_method: str | None = None,
+        category: str | None = None,
+        amount_min: float | None = None,
+        amount_max: float | None = None,
+        ciudad: str | None = None,
+    ) -> tuple[float, int, float, float, float]:
+        """Get aggregate totals for gastos with filters.
+
+        Unlike search_gastos, this method combines ALL filters together
+        including FTS and structured filters.
+
+        Args:
+            q: Full-text search query (combined with other filters).
+            date_from: Inclusive start date (YYYY-MM-DD).
+            date_to: Inclusive end date (YYYY-MM-DD).
+            persona: Filter by exact persona value.
+            payment_method: Filter by exact payment method.
+            category: Filter by category (contains).
+            amount_min: Minimum amount.
+            amount_max: Maximum amount.
+            ciudad: Filter by city name.
+
+        Returns:
+            Tuple of (total, count, min, max, avg).
+            Returns zero-safe defaults when no rows match.
+
+        Raises:
+            DatabaseError: If the operation fails after retries.
+        """
+
+        async def _get_totals() -> tuple[float, int, float, float, float]:
+            # Build WHERE clause and parameters
+            where_clauses: list[str] = []
+            params: list[str | float | None] = []
+
+            # FTS filter (combined with other filters)
+            if q:
+                fts_query = await self._build_fts_query(q)
+                where_clauses.append(
+                    "gastos.rowid IN "
+                    "(SELECT rowid FROM gastos_fts "
+                    "WHERE gastos_fts MATCH ?)"
+                )
+                params.append(fts_query)
+
+            # Date filters
+            if date_from:
+                where_clauses.append("date >= ?")
+                params.append(date_from)
+            if date_to:
+                where_clauses.append("date <= ?")
+                params.append(date_to)
+
+            # Structured filters
+            if persona:
+                where_clauses.append("persona = ?")
+                params.append(persona)
+            if payment_method:
+                where_clauses.append("payment_method = ?")
+                params.append(payment_method)
+            if category:
+                where_clauses.append("category LIKE ?")
+                params.append(f"%{category}%")
+
+            # Amount range filters
+            if amount_min is not None:
+                where_clauses.append("amount >= ?")
+                params.append(amount_min)
+            if amount_max is not None:
+                where_clauses.append("amount <= ?")
+                params.append(amount_max)
+
+            # City filter
+            if ciudad:
+                where_clauses.append("ciudad = ?")
+                params.append(ciudad)
+
+            # Build SQL query
+            where_sql = " AND ".join(where_clauses) if where_clauses else "1=1"
+
+            async with self.conn.execute(
+                f"SELECT "
+                f"COALESCE(SUM(amount), 0.0) as total, "
+                f"COUNT(*) as count, "
+                f"COALESCE(MIN(amount), 0.0) as min, "
+                f"COALESCE(MAX(amount), 0.0) as max, "
+                f"COALESCE(AVG(amount), 0.0) as avg "
+                f"FROM gastos WHERE {where_sql}",
+                params,
+            ) as cursor:
+                row = await cursor.fetchone()
+                if row is None:
+                    # Zero-safe defaults for empty result
+                    return (0.0, 0, 0.0, 0.0, 0.0)
+
+                total = float(row[0]) if row[0] is not None else 0.0
+                count = int(row[1]) if row[1] is not None else 0
+                min_val = float(row[2]) if row[2] is not None else 0.0
+                max_val = float(row[3]) if row[3] is not None else 0.0
+                avg_val = float(row[4]) if row[4] is not None else 0.0
+
+                return (total, count, min_val, max_val, avg_val)
+
+        return await self._retry_operation("get_totals", _get_totals)
+
+    async def get_gastos_summary(
+        self,
+        group_by: list[str],
+        q: str | None = None,
+        date_from: str | None = None,
+        date_to: str | None = None,
+        persona: str | None = None,
+        payment_method: str | None = None,
+        category: str | None = None,
+        amount_min: float | None = None,
+        amount_max: float | None = None,
+        ciudad: str | None = None,
+    ) -> tuple[list[dict[str, Any]], float, int]:
+        """Get grouped summary for gastos with filters.
+
+        This method implements single-dimension grouping for Step 5.
+        Multi-value explosion (category/persona) is NOT implemented yet.
+
+        Args:
+            group_by: List of grouping dimensions (1 dimension for Step 5).
+            q: Full-text search query (combined with other filters).
+            date_from: Inclusive start date (YYYY-MM-DD).
+            date_to: Inclusive end date (YYYY-MM-DD).
+            persona: Filter by exact persona value.
+            payment_method: Filter by exact payment method.
+            category: Filter by category (contains).
+            amount_min: Minimum amount.
+            amount_max: Maximum amount.
+            ciudad: Filter by city name.
+
+        Returns:
+            Tuple of (groups, grand_total, total_count).
+            - groups: List of dicts with 'key', 'total', 'count'
+            - grand_total: Total sum of filtered base set (pre-explosion)
+            - total_count: Count of filtered base set (pre-explosion)
+
+        Raises:
+            DatabaseError: If the operation fails after retries.
+        """
+
+        async def _get_summary() -> tuple[list[dict[str, Any]], float, int]:
+            # Build WHERE clause and parameters (same as totals)
+            where_clauses: list[str] = []
+            params: list[str | float | None] = []
+
+            # FTS filter (combined with other filters)
+            if q:
+                fts_query = await self._build_fts_query(q)
+                where_clauses.append(
+                    "gastos.rowid IN "
+                    "(SELECT rowid FROM gastos_fts "
+                    "WHERE gastos_fts MATCH ?)"
+                )
+                params.append(fts_query)
+
+            # Date filters
+            if date_from:
+                where_clauses.append("date >= ?")
+                params.append(date_from)
+            if date_to:
+                where_clauses.append("date <= ?")
+                params.append(date_to)
+
+            # Structured filters
+            if persona:
+                where_clauses.append("persona = ?")
+                params.append(persona)
+            if payment_method:
+                where_clauses.append("payment_method = ?")
+                params.append(payment_method)
+            if category:
+                where_clauses.append("category LIKE ?")
+                params.append(f"%{category}%")
+
+            # Amount range filters
+            if amount_min is not None:
+                where_clauses.append("amount >= ?")
+                params.append(amount_min)
+            if amount_max is not None:
+                where_clauses.append("amount <= ?")
+                params.append(amount_max)
+
+            # City filter
+            if ciudad:
+                where_clauses.append("ciudad = ?")
+                params.append(ciudad)
+
+            where_sql = " AND ".join(where_clauses) if where_clauses else "1=1"
+
+            # Compute grand_total and total_count from filtered base set
+            async with self.conn.execute(
+                f"SELECT COALESCE(SUM(amount), 0.0), COUNT(*) "
+                f"FROM gastos WHERE {where_sql}",
+                params,
+            ) as cursor:
+                row = await cursor.fetchone()
+                if row is None:
+                    grand_total = 0.0
+                    total_count = 0
+                else:
+                    grand_total = float(row[0]) if row[0] is not None else 0.0
+                    total_count = int(row[1]) if row[1] is not None else 0
+
+            # If no grouping requested, return empty groups
+            if not group_by:
+                return ([], grand_total, total_count)
+
+            # For Step 5, only single-dimension grouping is supported
+            # Multi-dimension and exploded grouping will be in Step 6
+            dimension = group_by[0]
+
+            # Build GROUP BY clause with NULL handling
+            # Map dimension to column name
+            column_map = {
+                "category": "category",
+                "persona": "persona",
+                "date": "date",
+                "ciudad": "ciudad",
+            }
+            column = column_map[dimension]
+
+            # Query grouped results with COALESCE for NULL handling
+            order_by = (
+                "ORDER BY date_grouped ASC"
+                if dimension == "date"
+                else "ORDER BY total DESC"
+            )
+            async with self.conn.execute(
+                f"SELECT "
+                f"COALESCE({column}, 'Unknown') as {column}_grouped, "
+                f"SUM(amount) as total, "
+                f"COUNT(*) as count "
+                f"FROM gastos "
+                f"WHERE {where_sql} "
+                f"GROUP BY {column}_grouped "
+                f"{order_by}",
+                params,
+            ) as cursor:
+                rows = await cursor.fetchall()
+
+            # Build groups list
+            groups: list[dict[str, Any]] = []
+            for row in rows:
+                group_value = str(row[0]) if row[0] is not None else "Unknown"
+                group_total = float(row[1]) if row[1] is not None else 0.0
+                group_count = int(row[2]) if row[2] is not None else 0
+
+                groups.append(
+                    {
+                        "key": {dimension: group_value},
+                        "total": group_total,
+                        "count": group_count,
+                    }
+                )
+
+            return (groups, grand_total, total_count)
+
+        return await self._retry_operation("get_summary", _get_summary)
 
     async def get_all_gastos_page_ids(self) -> set[str]:
         """Get all Gastos page IDs from the database.

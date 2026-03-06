@@ -81,6 +81,8 @@ class DatabaseClient:
                 amount REAL,
                 date DATE,
                 persona TEXT,
+                ciudad_page_id TEXT,
+                ciudad TEXT,
                 created_at TIMESTAMP NOT NULL,
                 updated_at TIMESTAMP NOT NULL
             )
@@ -199,6 +201,10 @@ class DatabaseClient:
             await self.conn.execute("ALTER TABLE gastos ADD COLUMN category TEXT")
         if "persona" not in existing:
             await self.conn.execute("ALTER TABLE gastos ADD COLUMN persona TEXT")
+        if "ciudad_page_id" not in existing:
+            await self.conn.execute("ALTER TABLE gastos ADD COLUMN ciudad_page_id TEXT")
+        if "ciudad" not in existing:
+            await self.conn.execute("ALTER TABLE gastos ADD COLUMN ciudad TEXT")
 
     async def get_gasto(self, page_id: str) -> Gasto | None:
         """Retrieve a single gasto by page_id.
@@ -217,7 +223,7 @@ class DatabaseClient:
             async with self.conn.execute(
                 """
                 SELECT page_id, payment_method, description, category,
-                amount, date, created_at, updated_at, persona
+                amount, date, created_at, updated_at, persona, ciudad_page_id, ciudad
                 FROM gastos
                 WHERE page_id = ?
                 """,
@@ -235,6 +241,8 @@ class DatabaseClient:
                         created_at=row[6],
                         updated_at=row[7],
                         persona=row[8],
+                        ciudad_page_id=row[9],
+                        ciudad=row[10],
                     )
             return None
 
@@ -306,10 +314,12 @@ class DatabaseClient:
                     amount,
                     date,
                     persona,
+                    ciudad_page_id,
+                    ciudad,
                     created_at,
                     updated_at
                 )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     gasto.page_id,
@@ -319,6 +329,8 @@ class DatabaseClient:
                     gasto.amount,
                     gasto.date,
                     gasto.persona,
+                    gasto.ciudad_page_id,
+                    gasto.ciudad,
                     gasto.created_at,
                     gasto.updated_at,
                 ),
@@ -344,7 +356,8 @@ class DatabaseClient:
             cursor = await self.conn.execute(
                 """UPDATE gastos
                 SET payment_method = ?, description = ?, category = ?, amount = ?,
-                date = ?, persona = ?, updated_at = ? WHERE page_id = ?""",
+                date = ?, persona = ?, ciudad_page_id = ?, ciudad = ?,
+                updated_at = ? WHERE page_id = ?""",
                 (
                     gasto.payment_method,
                     gasto.description,
@@ -352,6 +365,8 @@ class DatabaseClient:
                     gasto.amount,
                     gasto.date,
                     gasto.persona,
+                    gasto.ciudad_page_id,
+                    gasto.ciudad,
                     gasto.updated_at,
                     gasto.page_id,
                 ),
@@ -470,12 +485,23 @@ class DatabaseClient:
             placeholders = ",".join("?" for _ in page_ids)
 
             existing: dict[
-                str, tuple[object, object, object, object, object, object, object]
+                str,
+                tuple[
+                    object,
+                    object,
+                    object,
+                    object,
+                    object,
+                    object,
+                    object,
+                    object,
+                    object,
+                ],
             ] = {}
             async with self.conn.execute(
                 f"""
                 SELECT page_id, payment_method, description,
-                category, amount, date, persona, updated_at
+                category, amount, date, persona, ciudad_page_id, ciudad, updated_at
                 FROM gastos
                 WHERE page_id IN ({placeholders})
                 """,
@@ -491,6 +517,8 @@ class DatabaseClient:
                         row[5],
                         row[6],
                         row[7],
+                        row[8],
+                        row[9],
                     )
 
             created = 0
@@ -510,7 +538,9 @@ class DatabaseClient:
                             and row[3] == gasto.amount
                             and row[4] == gasto.date
                             and row[5] == gasto.persona
-                            and row[6] == gasto.updated_at
+                            and row[6] == gasto.ciudad_page_id
+                            and row[7] == gasto.ciudad
+                            and row[8] == gasto.updated_at
                         ):
                             skipped += 1
                             continue
@@ -520,7 +550,8 @@ class DatabaseClient:
                                 """UPDATE gastos
                                 SET payment_method = ?, description = ?,
                                 category = ?, amount = ?, date = ?,
-                                persona = ?, updated_at = ? WHERE page_id = ?""",
+                                persona = ?, ciudad_page_id = ?, ciudad = ?,
+                                updated_at = ? WHERE page_id = ?""",
                                 (
                                     gasto.payment_method,
                                     gasto.description,
@@ -528,6 +559,8 @@ class DatabaseClient:
                                     gasto.amount,
                                     gasto.date,
                                     gasto.persona,
+                                    gasto.ciudad_page_id,
+                                    gasto.ciudad,
                                     gasto.updated_at,
                                     gasto.page_id,
                                 ),
@@ -550,10 +583,12 @@ class DatabaseClient:
                                     amount,
                                     date,
                                     persona,
+                                    ciudad_page_id,
+                                    ciudad,
                                     created_at,
                                     updated_at
                                 )
-                                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                                 """,
                                 (
                                     gasto.page_id,
@@ -563,6 +598,8 @@ class DatabaseClient:
                                     gasto.amount,
                                     gasto.date,
                                     gasto.persona,
+                                    gasto.ciudad_page_id,
+                                    gasto.ciudad,
                                     gasto.created_at,
                                     gasto.updated_at,
                                 ),
@@ -1392,7 +1429,7 @@ class DatabaseClient:
             async with self.conn.execute(
                 """
                 SELECT page_id, payment_method, description, category,
-                amount, date, created_at, updated_at, persona
+                amount, date, created_at, updated_at, persona, ciudad_page_id, ciudad
                 FROM gastos
                 ORDER BY created_at DESC
                 LIMIT ? OFFSET ?
@@ -1411,6 +1448,8 @@ class DatabaseClient:
                         created_at=row[6],
                         updated_at=row[7],
                         persona=row[8],
+                        ciudad_page_id=row[9],
+                        ciudad=row[10],
                     )
                     for row in rows
                 ]
@@ -1539,7 +1578,8 @@ class DatabaseClient:
 
             async with self.conn.execute(
                 f"SELECT page_id, payment_method, description, category, "
-                f"amount, date, created_at, updated_at, persona "
+                f"amount, date, created_at, updated_at, persona, "
+                f"ciudad_page_id, ciudad "
                 f"FROM gastos WHERE {where_sql} {order_final} LIMIT ? OFFSET ?",
                 (*params, limit, offset),
             ) as cursor:
@@ -1555,6 +1595,8 @@ class DatabaseClient:
                         created_at=row[6],
                         updated_at=row[7],
                         persona=row[8],
+                        ciudad_page_id=row[9],
+                        ciudad=row[10],
                     )
                     for row in rows
                 ]

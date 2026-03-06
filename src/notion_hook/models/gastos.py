@@ -20,6 +20,10 @@ class Gasto(BaseModel):
     persona: str | None = Field(
         None, description="Persona (comma-separated if multi-select)"
     )
+    ciudad_page_id: str | None = Field(
+        None, description="Related city page ID from Notion relation"
+    )
+    ciudad: str | None = Field(None, description="City name from Notion relation")
     created_at: str = Field(..., description="Creation timestamp (ISO format)")
     updated_at: str = Field(..., description="Last update timestamp (ISO format)")
 
@@ -130,6 +134,16 @@ class Gasto(BaseModel):
             if persona is None:
                 persona = _extract_select_name(persona_prop)
 
+        # Extract Ciudad relation
+        ciudad_page_id = None
+        ciudad = None
+        if ciudad_prop := _first_property("Ciudad", "ciudad"):
+            relation = ciudad_prop.get("relation") or []
+            if isinstance(relation, list) and len(relation) > 0:
+                first_relation = relation[0]
+                if isinstance(first_relation, dict):
+                    ciudad_page_id = first_relation.get("id")
+
         return cls(
             page_id=page_id,
             payment_method=payment_method,
@@ -138,6 +152,8 @@ class Gasto(BaseModel):
             amount=amount,
             date=date,
             persona=persona,
+            ciudad_page_id=ciudad_page_id,
+            ciudad=ciudad,
             created_at=created_time,
             updated_at=last_edited_time,
         )

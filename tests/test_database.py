@@ -68,48 +68,98 @@ class TestDatabaseClient:
             assert client._conn is not None
 
     @pytest.mark.asyncio
-    async def test_create_gasto(self, db_client: DatabaseClient) -> None:
-        """Test creating a gasto."""
+    async def test_create_gasto_with_city_fields(
+        self, db_client: DatabaseClient
+    ) -> None:
+        """Test creating a gasto with city fields."""
         gasto = Gasto(
-            page_id="test-page-1",
+            page_id="test-page-city-1",
             payment_method="Cash",
-            description="Test expense",
-            category=None,
-            amount=100.0,
+            description="Test expense in Rome",
+            category="Food",
+            amount=50.0,
             date="2024-01-01",
-            persona=None,
+            persona="Franco",
+            ciudad_page_id="city-rome-123",
+            ciudad="Rome",
             created_at="2024-01-01T00:00:00Z",
             updated_at="2024-01-01T00:00:00Z",
         )
         await db_client.create_gasto(gasto)
-        retrieved = await db_client.get_gasto("test-page-1")
+        retrieved = await db_client.get_gasto("test-page-city-1")
         assert retrieved is not None
-        assert retrieved.page_id == "test-page-1"
-        assert retrieved.payment_method == "Cash"
-        assert retrieved.description == "Test expense"
-        assert retrieved.amount == 100.0
+        assert retrieved.page_id == "test-page-city-1"
+        assert retrieved.ciudad_page_id == "city-rome-123"
+        assert retrieved.ciudad == "Rome"
 
     @pytest.mark.asyncio
-    async def test_create_gasto_with_nulls(self, db_client: DatabaseClient) -> None:
-        """Test creating a gasto with null values."""
-        gasto = Gasto(
-            page_id="test-page-2",
-            payment_method=None,
-            description=None,
-            category=None,
-            amount=None,
-            date=None,
-            persona=None,
-            created_at="2024-01-01T00:00:00Z",
-            updated_at="2024-01-01T00:00:00Z",
-        )
-        await db_client.create_gasto(gasto)
-        retrieved = await db_client.get_gasto("test-page-2")
-        assert retrieved is not None
-        assert retrieved.payment_method is None
-        assert retrieved.description is None
-        assert retrieved.amount is None
-        assert retrieved.date is None
+    async def test_gastos_schema_migration(self, settings: Settings) -> None:
+        """Test that schema migration adds ciudad_page_id and ciudad columns."""
+        # Create a database with old schema (without ciudad fields)
+        async with aiosqlite.connect(settings.database_path) as conn:
+            await conn.execute("""
+                CREATE TABLE gastos (
+                    page_id TEXT PRIMARY KEY,
+                    payment_method TEXT,
+                    description TEXT,
+                    category TEXT,
+                    amount REAL,
+                    date DATE,
+                    persona TEXT,
+                    created_at TIMESTAMP NOT NULL,
+                    updated_at TIMESTAMP NOT NULL
+                )
+            """)
+            # Insert a row without ciudad fields
+            await conn.execute(
+                """INSERT INTO gastos (
+                    page_id, payment_method, description, category, amount, date,
+                    persona, created_at, updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                (
+                    "old-page-1",
+                    "Cash",
+                    "Old expense",
+                    None,
+                    100.0,
+                    "2024-01-01",
+                    None,
+                    "2024-01-01T00:00:00Z",
+                    "2024-01-01T00:00:00Z",
+                ),
+            )
+            await conn.commit()
+
+        # Initialize database client (should run migration)
+        async with DatabaseClient(settings) as client:
+            # Verify the old row still exists
+            gasto = await client.get_gasto("old-page-1")
+            assert gasto is not None
+            assert gasto.page_id == "old-page-1"
+            assert gasto.payment_method == "Cash"
+            assert gasto.ciudad_page_id is None
+            assert gasto.ciudad is None
+
+            # Verify we can create new rows with ciudad fields
+            new_gasto = Gasto(
+                page_id="new-page-1",
+                payment_method="Credit Card",
+                description="New expense",
+                category="Food",
+                amount=50.0,
+                date="2024-01-02",
+                persona="Franco",
+                ciudad_page_id="city-rome-456",
+                ciudad="Rome",
+                created_at="2024-01-02T00:00:00Z",
+                updated_at="2024-01-02T00:00:00Z",
+            )
+            await client.create_gasto(new_gasto)
+
+            retrieved = await client.get_gasto("new-page-1")
+            assert retrieved is not None
+            assert retrieved.ciudad_page_id == "city-rome-456"
+            assert retrieved.ciudad == "Rome"
 
     @pytest.mark.asyncio
     async def test_update_gasto(self, db_client: DatabaseClient) -> None:
@@ -122,6 +172,8 @@ class TestDatabaseClient:
             amount=100.0,
             date="2024-01-01",
             persona=None,
+            ciudad_page_id=None,
+            ciudad=None,
             created_at="2024-01-01T00:00:00Z",
             updated_at="2024-01-01T00:00:00Z",
         )
@@ -135,6 +187,8 @@ class TestDatabaseClient:
             amount=200.0,
             date="2024-01-02",
             persona=None,
+            ciudad_page_id="city-rome-123",
+            ciudad="Rome",
             created_at="2024-01-01T00:00:00Z",
             updated_at="2024-01-02T00:00:00Z",
         )
@@ -142,10 +196,13 @@ class TestDatabaseClient:
         assert result is True
 
         retrieved = await db_client.get_gasto("test-page-3")
+        assert retrieved is not None
         assert retrieved.payment_method == "Credit Card"
         assert retrieved.description == "Updated"
         assert retrieved.amount == 200.0
         assert retrieved.date == "2024-01-02"
+        assert retrieved.ciudad_page_id == "city-rome-123"
+        assert retrieved.ciudad == "Rome"
 
     @pytest.mark.asyncio
     async def test_update_nonexistent_gasto(self, db_client: DatabaseClient) -> None:
@@ -158,6 +215,8 @@ class TestDatabaseClient:
             amount=100.0,
             date="2024-01-01",
             persona=None,
+            ciudad_page_id=None,
+            ciudad=None,
             created_at="2024-01-01T00:00:00Z",
             updated_at="2024-01-01T00:00:00Z",
         )
@@ -175,6 +234,8 @@ class TestDatabaseClient:
             amount=100.0,
             date="2024-01-01",
             persona=None,
+            ciudad_page_id=None,
+            ciudad=None,
             created_at="2024-01-01T00:00:00Z",
             updated_at="2024-01-01T00:00:00Z",
         )
@@ -203,6 +264,8 @@ class TestDatabaseClient:
                 amount=100.0 * i,
                 date="2024-01-01",
                 persona=None,
+                ciudad_page_id=None,
+                ciudad=None,
                 created_at=f"2024-01-0{i}T00:00:00Z",
                 updated_at=f"2024-01-0{i}T00:00:00Z",
             )

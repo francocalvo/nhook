@@ -81,6 +81,7 @@ async def handle_notion_webhook(
         )
 
     date_value: DateValue | None = None
+    date_property_present = False
     properties = data.get("properties", {})
 
     # Get date property name from workflow configuration
@@ -89,17 +90,32 @@ async def handle_notion_webhook(
         date_property_name = registry.get_date_property_name(x_calvo_workflow)
         if date_property_name:
             if date_data := get_property_ci(properties, date_property_name):
+                date_property_present = True
                 try:
                     date_value = DateValue.model_validate(
                         date_data.get("date") if date_data else None
                     )
                 except Exception as e:
                     logger.warning(f"Failed to parse {date_property_name} value: {e}")
+            else:
+                logger.info(
+                    f"Skipping workflow '{x_calvo_workflow}' for page {page_id}: "
+                    f"missing expected property '{date_property_name}'"
+                )
+                return WebhookResponse(
+                    success=True,
+                    message=(
+                        f"Ignored webhook: missing expected property "
+                        f"'{date_property_name}'"
+                    ),
+                    page_id=page_id,
+                )
 
     context = WorkflowContext(
         page_id=page_id,
         payload=payload,
         date_value=date_value,  # Single field for all workflows
+        date_property_present=date_property_present,
         workflow_name=x_calvo_workflow,
     )
 

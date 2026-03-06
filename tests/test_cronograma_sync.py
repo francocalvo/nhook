@@ -61,6 +61,7 @@ class TestCronogramaSyncWorkflow:
             page_id="test-page-id",
             payload={"id": "test-page-id", "Date": None},
             date_value=None,
+            date_property_present=True,
         )
 
         result = await workflow.execute(context)
@@ -68,6 +69,24 @@ class TestCronogramaSyncWorkflow:
         mock_notion_client.update_gastos_cronograma_relation.assert_called_once_with(
             "test-page-id", []
         )
+        assert result["updated_relations"] == []
+
+    @pytest.mark.asyncio
+    async def test_execute_skips_when_date_property_missing(
+        self, mock_notion_client: AsyncMock
+    ) -> None:
+        """Test execute does nothing when webhook payload omits Date."""
+        workflow = CronogramaSyncWorkflow(mock_notion_client)
+        context = WorkflowContext(
+            page_id="test-page-id",
+            payload={"id": "test-page-id"},
+            date_value=None,
+            date_property_present=False,
+        )
+
+        result = await workflow.execute(context)
+
+        mock_notion_client.update_gastos_cronograma_relation.assert_not_called()
         assert result["updated_relations"] == []
 
     @pytest.mark.asyncio

@@ -15,6 +15,7 @@ from notion_hook.core.logging import setup_logging
 from notion_hook.core.middleware import LoggingMiddleware
 from notion_hook.services.gastos_reload import GastosReloadService
 from notion_hook.services.notion_reload import NotionReloadService
+from notion_hook.services.relation_relink import RelationRelinkService
 from notion_hook.workflows.atracciones_db_sync import AtraccionesDbSyncWorkflow
 from notion_hook.workflows.atracciones_sync import AtraccionesSyncWorkflow
 from notion_hook.workflows.ciudades_sync import CiudadesSyncWorkflow
@@ -33,6 +34,7 @@ _notion_client: NotionClient | None = None
 _database_client: DatabaseClient | None = None
 _reload_service: GastosReloadService | None = None
 _full_reload_service: NotionReloadService | None = None
+_relink_service: RelationRelinkService | None = None
 
 
 @asynccontextmanager
@@ -43,7 +45,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     and cleans up on shutdown.
     """
     global _workflow_registry, _notion_client, _database_client, _reload_service
-    global _full_reload_service
+    global _full_reload_service, _relink_service
 
     settings = get_settings()
     logger = setup_logging(settings.debug)
@@ -55,6 +57,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     created_registry = False
     created_reload_service = False
     created_full_reload_service = False
+    created_relink_service = False
 
     if _notion_client is None:
         _notion_client = NotionClient(settings)
@@ -86,6 +89,10 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         _full_reload_service = NotionReloadService(_notion_client, _database_client)
         created_full_reload_service = True
 
+    if _relink_service is None:
+        _relink_service = RelationRelinkService(_notion_client)
+        created_relink_service = True
+
     logger.info(f"Registered {len(_workflow_registry.workflows)} workflows")
 
     yield
@@ -106,6 +113,9 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
 
     if created_full_reload_service:
         _full_reload_service = None
+
+    if created_relink_service:
+        _relink_service = None
 
     logger.info("Shutdown complete")
 

@@ -54,6 +54,12 @@ class PasajesSyncWorkflow(BaseWorkflow):
         logger.info(f"Executing Pasajes sync for page {page_id}")
 
         if departure_value is None:
+            if not context.date_property_present:
+                logger.info(
+                    "No Departure property in webhook payload for "
+                    f"{page_id}; skipping sync"
+                )
+                return {"updated_relations": []}
             logger.info(
                 f"Departure cleared for {page_id}, removing Cronograma relations"
             )

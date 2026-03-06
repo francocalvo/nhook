@@ -55,6 +55,11 @@ class CronogramaSyncWorkflow(BaseWorkflow):
         logger.info(f"Executing Cronograma sync for page {page_id}")
 
         if date_value is None:
+            if not context.date_property_present:
+                logger.info(
+                    f"No Date property in webhook payload for {page_id}; skipping sync"
+                )
+                return {"updated_relations": []}
             logger.info(f"Date cleared for {page_id}, removing Cronograma relations")
             logger.debug(f"Calling update_gastos_cronograma_relation({page_id}, [])")
             await self.notion_client.update_gastos_cronograma_relation(page_id, [])

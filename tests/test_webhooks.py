@@ -68,6 +68,20 @@ def test_webhook_handles_empty_date(
     assert data["success"] is True
 
 
+def test_webhook_ignores_missing_expected_date_property(
+    test_client: TestClient, auth_headers: dict[str, str]
+) -> None:
+    """Test webhook is ignored when expected date property is missing."""
+    payload = make_notion_webhook_payload(extra_properties={"Name": {"title": []}})
+    del payload["data"]["properties"]["Date"]
+
+    response = test_client.post("/webhooks/notion", json=payload, headers=auth_headers)
+    assert response.status_code == 200
+    data = response.json()
+    assert data["success"] is True
+    assert "Ignored webhook" in data["message"]
+
+
 def test_webhook_with_pasajes_workflow(
     test_client: TestClient, auth_headers: dict[str, str]
 ) -> None:

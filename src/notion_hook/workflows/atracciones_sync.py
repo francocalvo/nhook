@@ -57,6 +57,11 @@ class AtraccionesSyncWorkflow(BaseWorkflow):
         logger.info(f"Executing Atracciones sync for page {page_id}")
 
         if fecha_value is None:
+            if not context.date_property_present:
+                logger.info(
+                    f"No Fecha property in webhook payload for {page_id}; skipping sync"
+                )
+                return {"updated_relations": []}
             logger.info(f"Fecha cleared for {page_id}, removing Cronograma relations")
             logger.debug(
                 f"Calling update_atracciones_cronograma_relation({page_id}, [])"

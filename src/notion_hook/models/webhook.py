@@ -33,6 +33,9 @@ class DateValue(BaseModel):
         if v is None:
             return None
 
+        if isinstance(v, datetime):
+            return v.date()
+
         if isinstance(v, date):
             return v
 
@@ -106,6 +109,7 @@ class WorkflowContext(BaseModel):
     page_id: str
     payload: dict[str, Any]
     date_value: DateValue | None = None  # Single date field used by all workflows
+    date_property_present: bool = False
     workflow_name: str | None = None
 
     model_config = {"arbitrary_types_allowed": True}

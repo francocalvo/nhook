@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import date
+from datetime import date, datetime
 from unittest.mock import AsyncMock
 
 import pytest
@@ -31,6 +31,11 @@ class TestDateValue:
         """Test DateValue handles datetime with timezone."""
         fecha_dict = {"start": "2026-03-14T10:30:00+03:00"}
         parsed = DateValue.model_validate(fecha_dict)
+        assert parsed.start == date(2026, 3, 14)
+
+    def test_parse_datetime_object(self) -> None:
+        """Test DateValue normalizes datetime objects to date."""
+        parsed = DateValue.model_validate({"start": datetime(2026, 3, 14, 10, 30)})
         assert parsed.start == date(2026, 3, 14)
 
     def test_parse_date_range(self) -> None:
@@ -94,6 +99,7 @@ class TestAtraccionesSyncWorkflow:
             page_id="test-page-id",
             payload={"id": "test-page-id"},
             date_value=None,
+            date_property_present=True,
             workflow_name="atracciones-cronograma",
         )
 
@@ -102,6 +108,25 @@ class TestAtraccionesSyncWorkflow:
         mock_notion_client.update_atracciones_cronograma_relation.assert_called_once_with(
             "test-page-id", []
         )
+        assert result["updated_relations"] == []
+
+    @pytest.mark.asyncio
+    async def test_execute_skips_when_fecha_property_missing(
+        self, mock_notion_client: AsyncMock
+    ) -> None:
+        """Test execute does nothing when webhook payload omits Fecha."""
+        workflow = AtraccionesSyncWorkflow(mock_notion_client)
+        context = WorkflowContext(
+            page_id="test-page-id",
+            payload={"id": "test-page-id"},
+            date_value=None,
+            date_property_present=False,
+            workflow_name="atracciones-cronograma",
+        )
+
+        result = await workflow.execute(context)
+
+        mock_notion_client.update_atracciones_cronograma_relation.assert_not_called()
         assert result["updated_relations"] == []
 
     @pytest.mark.asyncio

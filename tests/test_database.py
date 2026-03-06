@@ -1585,6 +1585,681 @@ class TestDatabaseClient:
         assert total_count == 2
 
     @pytest.mark.asyncio
+    async def test_get_gastos_summary_exploded_category(
+        self, db_client: DatabaseClient
+    ) -> None:
+        """Test summary with exploded category (comma-separated values)."""
+        gastos = [
+            Gasto(
+                page_id="expl-cat-1",
+                payment_method="credit_card",
+                description="Groceries",
+                category="Food, Groceries",  # Multi-value
+                amount=100.0,
+                date="2026-01-10",
+                persona="John",
+                ciudad_page_id=None,
+                ciudad="Rome",
+                created_at="2026-01-10T12:00:00Z",
+                updated_at="2026-01-10T12:00:00Z",
+            ),
+            Gasto(
+                page_id="expl-cat-2",
+                payment_method="credit_card",
+                description="Restaurant",
+                category="Food",  # Single value
+                amount=50.0,
+                date="2026-01-11",
+                persona="Jane",
+                ciudad_page_id=None,
+                ciudad="Paris",
+                created_at="2026-01-11T12:00:00Z",
+                updated_at="2026-01-11T12:00:00Z",
+            ),
+        ]
+
+        for gasto in gastos:
+            await db_client.create_gasto(gasto)
+
+        groups, grand_total, total_count = await db_client.get_gastos_summary(
+            group_by=["category"]
+        )
+
+        # Should have 2 groups: Food and Groceries
+        assert len(groups) == 2
+
+        # Find each group
+        food_group = next((g for g in groups if g["key"]["category"] == "Food"), None)
+        groceries_group = next(
+            (g for g in groups if g["key"]["category"] == "Groceries"), None
+        )
+
+        assert food_group is not None
+        assert groceries_group is not None
+
+        # First gasto contributes to both groups
+        assert food_group["total"] == 150.0  # 100 + 50
+        assert food_group["count"] == 2
+        assert groceries_group["total"] == 100.0  # Only first gasto
+        assert groceries_group["count"] == 1
+
+        # Grand total should be pre-explosion (sum of both gastos)
+        assert grand_total == 150.0
+        assert total_count == 2
+
+        # Verify grouped totals exceed grand_total (exploded behavior)
+        grouped_sum = sum(g["total"] for g in groups)
+        assert grouped_sum == 250.0  # 150 + 100
+        assert grouped_sum > grand_total
+
+    @pytest.mark.asyncio
+    async def test_get_gastos_summary_exploded_persona(
+        self, db_client: DatabaseClient
+    ) -> None:
+        """Test summary with exploded persona (comma-separated values)."""
+        gastos = [
+            Gasto(
+                page_id="expl-per-1",
+                payment_method="credit_card",
+                description="Shared meal",
+                category="Food",
+                amount=120.0,
+                date="2026-01-10",
+                persona="Franco, Mica",  # Multi-value
+                ciudad_page_id=None,
+                ciudad="Rome",
+                created_at="2026-01-10T12:00:00Z",
+                updated_at="2026-01-10T12:00:00Z",
+            ),
+        ]
+
+        for gasto in gastos:
+            await db_client.create_gasto(gasto)
+
+        groups, grand_total, total_count = await db_client.get_gastos_summary(
+            group_by=["persona"]
+        )
+
+        # Should have 2 groups: Franco and Mica
+        assert len(groups) == 2
+
+        franco_group = next(
+            (g for g in groups if g["key"]["persona"] == "Franco"), None
+        )
+        mica_group = next((g for g in groups if g["key"]["persona"] == "Mica"), None)
+
+        assert franco_group is not None
+        assert mica_group is not None
+
+        # Same gasto contributes to both groups
+        assert franco_group["total"] == 120.0
+        assert franco_group["count"] == 1
+        assert mica_group["total"] == 120.0
+        assert mica_group["count"] == 1
+
+        # Grand total should be pre-explosion
+        assert grand_total == 120.0
+        assert total_count == 1
+
+        # Verify grouped totals exceed grand_total
+        grouped_sum = sum(g["total"] for g in groups)
+        assert grouped_sum == 240.0  # 120 + 120
+        assert grouped_sum > grand_total
+
+    @pytest.mark.asyncio
+    async def test_get_gastos_summary_multi_dimension_one_exploded(
+        self, db_client: DatabaseClient
+    ) -> None:
+        """Test multi-dimension grouping with one exploded dimension."""
+        gastos = [
+            Gasto(
+                page_id="multi-1-expl-1",
+                payment_method="credit_card",
+                description="Groceries",
+                category="Food, Groceries",  # Exploded
+                amount=100.0,
+                date="2026-01-10",
+                persona="John",
+                ciudad_page_id=None,
+                ciudad="Rome",
+                created_at="2026-01-10T12:00:00Z",
+                updated_at="2026-01-10T12:00:00Z",
+            ),
+            Gasto(
+                page_id="multi-1-expl-2",
+                payment_method="credit_card",
+                description="Restaurant",
+                category="Food",  # Single value
+                amount=50.0,
+                date="2026-01-11",
+                persona="Jane",
+                ciudad_page_id=None,
+                ciudad="Paris",
+                created_at="2026-01-11T12:00:00Z",
+                updated_at="2026-01-11T12:00:00Z",
+            ),
+        ]
+
+        for gasto in gastos:
+            await db_client.create_gasto(gasto)
+
+        # Group by category (exploded) and ciudad (not exploded)
+        groups, grand_total, total_count = await db_client.get_gastos_summary(
+            group_by=["category", "ciudad"]
+        )
+
+        # Should have 3 groups:
+        # - Food×Rome (100)
+        # - Groceries×Rome (100)
+        # - Food×Paris (50)
+        assert len(groups) == 3
+
+        # Verify groups exist
+        group_keys = [tuple(sorted(g["key"].items())) for g in groups]
+        assert (("category", "Food"), ("ciudad", "Paris")) in group_keys
+        assert (("category", "Food"), ("ciudad", "Rome")) in group_keys
+        assert (("category", "Groceries"), ("ciudad", "Rome")) in group_keys
+
+        # Grand total should be pre-explosion
+        assert grand_total == 150.0
+        assert total_count == 2
+
+    @pytest.mark.asyncio
+    async def test_get_gastos_summary_multi_dimension_both_exploded(
+        self, db_client: DatabaseClient
+    ) -> None:
+        """Test multi-dimension grouping with both dimensions exploded."""
+        gastos = [
+            Gasto(
+                page_id="multi-both-1",
+                payment_method="credit_card",
+                description="Shared meal",
+                category="Food, Groceries",  # 2 values
+                amount=100.0,
+                date="2026-01-10",
+                persona="Franco, Mica",  # 2 values
+                ciudad_page_id=None,
+                ciudad="Rome",
+                created_at="2026-01-10T12:00:00Z",
+                updated_at="2026-01-10T12:00:00Z",
+            ),
+        ]
+
+        for gasto in gastos:
+            await db_client.create_gasto(gasto)
+
+        # Group by both exploded dimensions
+        groups, grand_total, total_count = await db_client.get_gastos_summary(
+            group_by=["category", "persona"]
+        )
+
+        # Should have 4 groups (2×2 cross-product):
+        # - Food×Franco (100)
+        # - Food×Mica (100)
+        # - Groceries×Franco (100)
+        # - Groceries×Mica (100)
+        assert len(groups) == 4
+
+        # All groups should have same total and count
+        for group in groups:
+            assert group["total"] == 100.0
+            assert group["count"] == 1
+            assert "category" in group["key"]
+            assert "persona" in group["key"]
+
+        # Verify all combinations exist
+        combinations = [(g["key"]["category"], g["key"]["persona"]) for g in groups]
+        assert ("Food", "Franco") in combinations
+        assert ("Food", "Mica") in combinations
+        assert ("Groceries", "Franco") in combinations
+        assert ("Groceries", "Mica") in combinations
+
+        # Grand total should be pre-explosion
+        assert grand_total == 100.0
+        assert total_count == 1
+
+        # Verify grouped totals exceed grand_total significantly
+        grouped_sum = sum(g["total"] for g in groups)
+        assert grouped_sum == 400.0  # 100 × 4 groups
+        assert grouped_sum > grand_total
+
+    @pytest.mark.asyncio
+    async def test_get_gastos_summary_multi_dimension_no_explosion(
+        self, db_client: DatabaseClient
+    ) -> None:
+        """Test multi-dimension grouping with non-exploded dimensions."""
+        gastos = [
+            Gasto(
+                page_id="multi-no-expl-1",
+                payment_method="credit_card",
+                description="Lunch",
+                category="Food",
+                amount=100.0,
+                date="2026-01-10",
+                persona="John",
+                ciudad_page_id=None,
+                ciudad="Rome",
+                created_at="2026-01-10T12:00:00Z",
+                updated_at="2026-01-10T12:00:00Z",
+            ),
+            Gasto(
+                page_id="multi-no-expl-2",
+                payment_method="credit_card",
+                description="Dinner",
+                category="Food",
+                amount=80.0,
+                date="2026-01-10",
+                persona="Jane",
+                ciudad_page_id=None,
+                ciudad="Paris",
+                created_at="2026-01-10T12:00:00Z",
+                updated_at="2026-01-10T12:00:00Z",
+            ),
+            Gasto(
+                page_id="multi-no-expl-3",
+                payment_method="credit_card",
+                description="Breakfast",
+                category="Food",
+                amount=50.0,
+                date="2026-01-11",
+                persona="John",
+                ciudad_page_id=None,
+                ciudad="Rome",
+                created_at="2026-01-11T12:00:00Z",
+                updated_at="2026-01-11T12:00:00Z",
+            ),
+        ]
+
+        for gasto in gastos:
+            await db_client.create_gasto(gasto)
+
+        # Group by date and ciudad (both non-exploded)
+        groups, grand_total, total_count = await db_client.get_gastos_summary(
+            group_by=["date", "ciudad"]
+        )
+
+        # Should have 3 groups:
+        # - 2026-01-10×Rome (100)
+        # - 2026-01-10×Paris (80)
+        # - 2026-01-11×Rome (50)
+        assert len(groups) == 3
+
+        # Should be sorted by date (ascending) since date is a grouping dimension
+        dates = [g["key"]["date"] for g in groups]
+        assert dates == sorted(dates)
+
+        # Grand total should match sum of groups (no explosion)
+        assert grand_total == 230.0
+        assert total_count == 3
+
+        grouped_sum = sum(g["total"] for g in groups)
+        assert grouped_sum == grand_total  # No explosion, should match
+
+    @pytest.mark.asyncio
+    async def test_get_gastos_summary_exploded_with_unknown(
+        self, db_client: DatabaseClient
+    ) -> None:
+        """Test exploded grouping with unknown values."""
+        gastos = [
+            Gasto(
+                page_id="expl-unk-1",
+                payment_method="credit_card",
+                description="Groceries",
+                category="Food, Groceries",  # Multi-value
+                amount=100.0,
+                date="2026-01-10",
+                persona=None,  # Missing
+                ciudad_page_id=None,
+                ciudad="Rome",
+                created_at="2026-01-10T12:00:00Z",
+                updated_at="2026-01-10T12:00:00Z",
+            ),
+        ]
+
+        for gasto in gastos:
+            await db_client.create_gasto(gasto)
+
+        # Group by both category (exploded) and persona (missing -> Unknown)
+        groups, grand_total, total_count = await db_client.get_gastos_summary(
+            group_by=["category", "persona"]
+        )
+
+        # Should have 2 groups (2 categories × 1 persona (Unknown)):
+        # - Food×Unknown (100)
+        # - Groceries×Unknown (100)
+        assert len(groups) == 2
+
+        for group in groups:
+            assert group["key"]["persona"] == "Unknown"
+            assert group["total"] == 100.0
+            assert group["count"] == 1
+
+        assert grand_total == 100.0
+        assert total_count == 1
+
+    @pytest.mark.asyncio
+    async def test_get_gastos_summary_duplicate_category_tokens(
+        self, db_client: DatabaseClient
+    ) -> None:
+        """Test that duplicate category tokens are deduplicated (no double-counting)."""
+        gastos = [
+            Gasto(
+                page_id="dup-cat-1",
+                payment_method="credit_card",
+                description="Test",
+                category="Food, Food, Food",  # Duplicate tokens
+                amount=100.0,
+                date="2026-01-10",
+                persona="John",
+                ciudad_page_id=None,
+                ciudad="Rome",
+                created_at="2026-01-10T12:00:00Z",
+                updated_at="2026-01-10T12:00:00Z",
+            ),
+        ]
+
+        for gasto in gastos:
+            await db_client.create_gasto(gasto)
+
+        groups, grand_total, total_count = await db_client.get_gastos_summary(
+            group_by=["category"]
+        )
+
+        # Should have 1 group only (Food), not 3
+        assert len(groups) == 1
+
+        food_group = groups[0]
+        assert food_group["key"]["category"] == "Food"
+        # Should count once, not 3 times
+        assert food_group["total"] == 100.0
+        assert food_group["count"] == 1
+
+        assert grand_total == 100.0
+        assert total_count == 1
+
+    @pytest.mark.asyncio
+    async def test_get_gastos_summary_duplicate_persona_tokens(
+        self, db_client: DatabaseClient
+    ) -> None:
+        """Test that duplicate persona tokens are deduplicated (no double-counting)."""
+        gastos = [
+            Gasto(
+                page_id="dup-per-1",
+                payment_method="credit_card",
+                description="Test",
+                category="Food",
+                amount=100.0,
+                date="2026-01-10",
+                persona="John, John, Jane, Jane",  # Duplicate tokens
+                ciudad_page_id=None,
+                ciudad="Rome",
+                created_at="2026-01-10T12:00:00Z",
+                updated_at="2026-01-10T12:00:00Z",
+            ),
+        ]
+
+        for gasto in gastos:
+            await db_client.create_gasto(gasto)
+
+        groups, grand_total, total_count = await db_client.get_gastos_summary(
+            group_by=["persona"]
+        )
+
+        # Should have 2 groups only (John, Jane), not 4
+        assert len(groups) == 2
+
+        john_group = next((g for g in groups if g["key"]["persona"] == "John"), None)
+        jane_group = next((g for g in groups if g["key"]["persona"] == "Jane"), None)
+
+        assert john_group is not None
+        assert jane_group is not None
+
+        # Each should count once
+        assert john_group["total"] == 100.0
+        assert john_group["count"] == 1
+        assert jane_group["total"] == 100.0
+        assert jane_group["count"] == 1
+
+        assert grand_total == 100.0
+        assert total_count == 1
+
+    @pytest.mark.asyncio
+    async def test_get_gastos_summary_cross_product_duplicate_tokens(
+        self, db_client: DatabaseClient
+    ) -> None:
+        """Test cross-product grouping with duplicate tokens in both dimensions."""
+        gastos = [
+            Gasto(
+                page_id="dup-cross-1",
+                payment_method="credit_card",
+                description="Test",
+                category="Food, Food, Groceries",  # 2 unique (Food, Groceries)
+                amount=100.0,
+                date="2026-01-10",
+                persona="John, John, Jane",  # 2 unique (John, Jane)
+                ciudad_page_id=None,
+                ciudad="Rome",
+                created_at="2026-01-10T12:00:00Z",
+                updated_at="2026-01-10T12:00:00Z",
+            ),
+        ]
+
+        for gasto in gastos:
+            await db_client.create_gasto(gasto)
+
+        groups, grand_total, total_count = await db_client.get_gastos_summary(
+            group_by=["category", "persona"]
+        )
+
+        # Should have 4 groups (2 categories × 2 personas), not 9 (3×3)
+        assert len(groups) == 4
+
+        # Expected combinations: Food×John, Food×Jane, Groceries×John, Groceries×Jane
+        expected_combos = [
+            ("Food", "John"),
+            ("Food", "Jane"),
+            ("Groceries", "John"),
+            ("Groceries", "Jane"),
+        ]
+
+        for cat, per in expected_combos:
+            group = next(
+                (
+                    g
+                    for g in groups
+                    if g["key"]["category"] == cat and g["key"]["persona"] == per
+                ),
+                None,
+            )
+            assert group is not None
+            assert group["total"] == 100.0
+            assert group["count"] == 1
+
+        assert grand_total == 100.0
+        assert total_count == 1
+
+    @pytest.mark.asyncio
+    async def test_get_gastos_summary_exploded_with_date_filters(
+        self, db_client: DatabaseClient
+    ) -> None:
+        """Test exploded grouping works correctly with date filters."""
+        gastos = [
+            Gasto(
+                page_id="expl-date-filter-1",
+                payment_method="credit_card",
+                description="Groceries",
+                category="Food, Groceries",  # Exploded
+                amount=100.0,
+                date="2026-01-10",
+                persona="John",
+                ciudad_page_id=None,
+                ciudad="Rome",
+                created_at="2026-01-10T12:00:00Z",
+                updated_at="2026-01-10T12:00:00Z",
+            ),
+            Gasto(
+                page_id="expl-date-filter-2",
+                payment_method="cash",
+                description="Restaurant",
+                category="Food",  # Single value
+                amount=50.0,
+                date="2026-01-20",  # Outside filter range
+                persona="Jane",
+                ciudad_page_id=None,
+                ciudad="Paris",
+                created_at="2026-01-20T12:00:00Z",
+                updated_at="2026-01-20T12:00:00Z",
+            ),
+        ]
+
+        for gasto in gastos:
+            await db_client.create_gasto(gasto)
+
+        # Filter to only include Jan 5-15
+        groups, grand_total, total_count = await db_client.get_gastos_summary(
+            group_by=["category"],
+            date_from="2026-01-05",
+            date_to="2026-01-15",
+        )
+
+        # Only first gasto should be included (within date range)
+        assert len(groups) == 2  # Food and Groceries
+        assert grand_total == 100.0  # Only first gasto
+        assert total_count == 1
+
+        # Verify both exploded categories are present
+        food_group = next((g for g in groups if g["key"]["category"] == "Food"), None)
+        groceries_group = next(
+            (g for g in groups if g["key"]["category"] == "Groceries"), None
+        )
+
+        assert food_group is not None
+        assert food_group["total"] == 100.0
+        assert food_group["count"] == 1
+
+        assert groceries_group is not None
+        assert groceries_group["total"] == 100.0
+        assert groceries_group["count"] == 1
+
+    @pytest.mark.asyncio
+    async def test_get_gastos_summary_exploded_with_ciudad_filter(
+        self, db_client: DatabaseClient
+    ) -> None:
+        """Test exploded grouping works correctly with ciudad filter."""
+        gastos = [
+            Gasto(
+                page_id="expl-ciudad-filter-1",
+                payment_method="credit_card",
+                description="Groceries",
+                category="Food, Groceries",  # Exploded
+                amount=100.0,
+                date="2026-01-10",
+                persona="John",
+                ciudad_page_id=None,
+                ciudad="Rome",
+                created_at="2026-01-10T12:00:00Z",
+                updated_at="2026-01-10T12:00:00Z",
+            ),
+            Gasto(
+                page_id="expl-ciudad-filter-2",
+                payment_method="cash",
+                description="Restaurant",
+                category="Food",  # Single value
+                amount=50.0,
+                date="2026-01-11",
+                persona="Jane",
+                ciudad_page_id=None,
+                ciudad="Paris",  # Different ciudad
+                created_at="2026-01-11T12:00:00Z",
+                updated_at="2026-01-11T12:00:00Z",
+            ),
+        ]
+
+        for gasto in gastos:
+            await db_client.create_gasto(gasto)
+
+        # Filter to only include Rome
+        groups, grand_total, total_count = await db_client.get_gastos_summary(
+            group_by=["category"], ciudad="Rome"
+        )
+
+        # Only first gasto should be included (Rome only)
+        assert len(groups) == 2  # Food and Groceries
+        assert grand_total == 100.0  # Only first gasto
+        assert total_count == 1
+
+        # Verify both exploded categories are present from the filtered gasto
+        food_group = next((g for g in groups if g["key"]["category"] == "Food"), None)
+        groceries_group = next(
+            (g for g in groups if g["key"]["category"] == "Groceries"), None
+        )
+
+        assert food_group is not None
+        assert food_group["total"] == 100.0
+
+        assert groceries_group is not None
+        assert groceries_group["total"] == 100.0
+
+    @pytest.mark.asyncio
+    async def test_get_gastos_summary_exploded_with_fts(
+        self, db_client: DatabaseClient
+    ) -> None:
+        """Test exploded grouping works correctly with full-text search."""
+        gastos = [
+            Gasto(
+                page_id="expl-fts-1",
+                payment_method="credit_card",
+                description="Grocery shopping",
+                category="Food, Groceries",  # Exploded
+                amount=100.0,
+                date="2026-01-10",
+                persona="John",
+                ciudad_page_id=None,
+                ciudad="Rome",
+                created_at="2026-01-10T12:00:00Z",
+                updated_at="2026-01-10T12:00:00Z",
+            ),
+            Gasto(
+                page_id="expl-fts-2",
+                payment_method="cash",
+                description="Restaurant dinner",
+                category="Food",  # Single value
+                amount=50.0,
+                date="2026-01-11",
+                persona="Jane",
+                ciudad_page_id=None,
+                ciudad="Paris",
+                created_at="2026-01-11T19:00:00Z",
+                updated_at="2026-01-11T19:00:00Z",
+            ),
+        ]
+
+        for gasto in gastos:
+            await db_client.create_gasto(gasto)
+
+        # Search for "grocery" (matches first gasto)
+        groups, grand_total, total_count = await db_client.get_gastos_summary(
+            group_by=["category"], q="grocery"
+        )
+
+        # Only first gasto should be included (matches FTS)
+        assert len(groups) == 2  # Food and Groceries
+        assert grand_total == 100.0  # Only first gasto
+        assert total_count == 1
+
+        # Verify both exploded categories are present from the FTS-matched gasto
+        food_group = next((g for g in groups if g["key"]["category"] == "Food"), None)
+        groceries_group = next(
+            (g for g in groups if g["key"]["category"] == "Groceries"), None
+        )
+
+        assert food_group is not None
+        assert food_group["total"] == 100.0
+
+        assert groceries_group is not None
+        assert groceries_group["total"] == 100.0
+
+    @pytest.mark.asyncio
     async def test_ciudad_crud(self, db_client: DatabaseClient) -> None:
         """Test create/get/update/delete for ciudades."""
         ciudad = Ciudad(

@@ -1931,11 +1931,11 @@ class DatabaseClient:
     ) -> tuple[list[dict[str, Any]], float, int]:
         """Get grouped summary for gastos with filters.
 
-        This method implements single-dimension grouping for Step 5.
-        Multi-value explosion (category/persona) is NOT implemented yet.
+        Supports single or multi-dimension grouping with exploded handling
+        for category and persona fields.
 
         Args:
-            group_by: List of grouping dimensions (1 dimension for Step 5).
+            group_by: List of grouping dimensions (e.g., ['category', 'persona']).
             q: Full-text search query (combined with other filters).
             date_from: Inclusive start date (YYYY-MM-DD).
             date_to: Inclusive end date (YYYY-MM-DD).
@@ -2023,53 +2023,112 @@ class DatabaseClient:
             if not group_by:
                 return ([], grand_total, total_count)
 
-            # For Step 5, only single-dimension grouping is supported
-            # Multi-dimension and exploded grouping will be in Step 6
-            dimension = group_by[0]
-
-            # Build GROUP BY clause with NULL handling
-            # Map dimension to column name
-            column_map = {
-                "category": "category",
-                "persona": "persona",
-                "date": "date",
-                "ciudad": "ciudad",
-            }
-            column = column_map[dimension]
-
-            # Query grouped results with COALESCE for NULL handling
-            order_by = (
-                "ORDER BY date_grouped ASC"
-                if dimension == "date"
-                else "ORDER BY total DESC"
-            )
+            # Fetch all filtered rows for Python-side grouping
             async with self.conn.execute(
-                f"SELECT "
-                f"COALESCE({column}, 'Unknown') as {column}_grouped, "
-                f"SUM(amount) as total, "
-                f"COUNT(*) as count "
-                f"FROM gastos "
-                f"WHERE {where_sql} "
-                f"GROUP BY {column}_grouped "
-                f"{order_by}",
+                f"SELECT category, persona, date, ciudad, amount "
+                f"FROM gastos WHERE {where_sql}",
                 params,
             ) as cursor:
                 rows = await cursor.fetchall()
 
-            # Build groups list
-            groups: list[dict[str, Any]] = []
-            for row in rows:
-                group_value = str(row[0]) if row[0] is not None else "Unknown"
-                group_total = float(row[1]) if row[1] is not None else 0.0
-                group_count = int(row[2]) if row[2] is not None else 0
+            # Group rows in Python with exploded handling
+            # Key: tuple of dimension values, Value: (total, count)
+            group_aggregates: dict[tuple[str, ...], tuple[float, int]] = {}
 
+            for row in rows:
+                category_val = str(row[0]) if row[0] is not None else None
+                persona_val = str(row[1]) if row[1] is not None else None
+                date_val = str(row[2]) if row[2] is not None else None
+                ciudad_val = str(row[3]) if row[3] is not None else None
+                amount_val = float(row[4]) if row[4] is not None else 0.0
+
+                # Expand dimension values (explode category/persona if needed)
+                expanded_values: dict[str, list[str]] = {}
+                for dim in group_by:
+                    if dim == "category":
+                        if category_val:
+                            # Split comma-separated values and deduplicate
+                            # (preserve order using dict.fromkeys)
+                            values = list(
+                                dict.fromkeys(
+                                    v.strip()
+                                    for v in category_val.split(",")
+                                    if v.strip()
+                                )
+                            )
+                            expanded_values[dim] = values if values else ["Unknown"]
+                        else:
+                            expanded_values[dim] = ["Unknown"]
+                    elif dim == "persona":
+                        if persona_val:
+                            # Split comma-separated values and deduplicate
+                            # (preserve order using dict.fromkeys)
+                            values = list(
+                                dict.fromkeys(
+                                    v.strip()
+                                    for v in persona_val.split(",")
+                                    if v.strip()
+                                )
+                            )
+                            expanded_values[dim] = values if values else ["Unknown"]
+                        else:
+                            expanded_values[dim] = ["Unknown"]
+                    elif dim == "date":
+                        expanded_values[dim] = [date_val if date_val else "Unknown"]
+                    elif dim == "ciudad":
+                        expanded_values[dim] = [ciudad_val if ciudad_val else "Unknown"]
+
+                # Build cross-product of all dimension values
+                # For single dimension, this is just the list of values
+                # For multiple dimensions, this creates all combinations
+                def build_combinations(
+                    dims: list[str], idx: int
+                ) -> list[tuple[str, ...]]:
+                    """Recursively build all combinations of dimension values."""
+                    if idx >= len(dims):
+                        return [()]
+                    dim = dims[idx]
+                    rest_combinations = build_combinations(dims, idx + 1)
+                    result = []
+                    for val in expanded_values[dim]:
+                        for rest in rest_combinations:
+                            result.append((val,) + rest)
+                    return result
+
+                combinations = build_combinations(group_by, 0)
+
+                # Add amount to each group combination
+                for combo in combinations:
+                    if combo not in group_aggregates:
+                        group_aggregates[combo] = (0.0, 0)
+                    current_total, current_count = group_aggregates[combo]
+                    group_aggregates[combo] = (
+                        current_total + amount_val,
+                        current_count + 1,
+                    )
+
+            # Convert aggregates to list of group dicts
+            groups: list[dict[str, Any]] = []
+            for combo, (total, count) in group_aggregates.items():
+                # Build key dict from dimension names and values
+                key_dict = {dim: combo[i] for i, dim in enumerate(group_by)}
                 groups.append(
                     {
-                        "key": {dimension: group_value},
-                        "total": group_total,
-                        "count": group_count,
+                        "key": key_dict,
+                        "total": total,
+                        "count": count,
                     }
                 )
+
+            # Sort groups
+            # If any dimension is 'date', sort by date ascending
+            # Otherwise, sort by total descending
+            if "date" in group_by:
+                # Find the index of 'date' in group_by
+                date_idx = group_by.index("date")
+                groups.sort(key=lambda g: g["key"][group_by[date_idx]])
+            else:
+                groups.sort(key=lambda g: g["total"], reverse=True)
 
             return (groups, grand_total, total_count)
 

@@ -1136,6 +1136,225 @@ class TestGetGastosSummary:
         assert "Duplicate" in body["detail"]
         assert "category" in body["detail"]
 
+    def test_summary_multi_dimension_group_by_accepted(
+        self,
+        test_client_with_mocks: TestClient,
+        auth_headers: dict[str, str],
+        mock_database_client: AsyncMock,
+    ) -> None:
+        """Test multi-dimension group_by is accepted (Step 6)."""
+        mock_database_client.get_gastos_summary.return_value = (
+            [
+                {
+                    "key": {"category": "Food", "persona": "Franco"},
+                    "total": 100.0,
+                    "count": 2,
+                },
+                {
+                    "key": {"category": "Food", "persona": "Mica"},
+                    "total": 80.0,
+                    "count": 1,
+                },
+            ],
+            180.0,
+            3,
+        )
+
+        resp = test_client_with_mocks.get(
+            "/api/gastos/summary?group_by=category,persona", headers=auth_headers
+        )
+        assert resp.status_code == 200
+        body = resp.json()
+        assert len(body["groups"]) == 2
+        assert body["groups"][0]["key"] == {
+            "category": "Food",
+            "persona": "Franco",
+        }
+        assert body["grand_total"] == 180.0
+        assert body["total_count"] == 3
+
+        # Verify database was called with multi-dimension list
+        mock_database_client.get_gastos_summary.assert_called_once()
+        call_args = mock_database_client.get_gastos_summary.call_args
+        assert call_args[1]["group_by"] == ["category", "persona"]
+
+    def test_summary_exploded_grouping(
+        self,
+        test_client_with_mocks: TestClient,
+        auth_headers: dict[str, str],
+        mock_database_client: AsyncMock,
+    ) -> None:
+        """Test exploded grouping behavior (grouped totals > grand_total)."""
+        # Mock response where grouped totals exceed grand_total due to explosion
+        mock_database_client.get_gastos_summary.return_value = (
+            [
+                {"key": {"category": "Food"}, "total": 150.0, "count": 2},
+                {"key": {"category": "Groceries"}, "total": 100.0, "count": 1},
+            ],
+            150.0,  # grand_total (pre-explosion)
+            2,  # total_count (pre-explosion)
+        )
+
+        resp = test_client_with_mocks.get(
+            "/api/gastos/summary?group_by=category", headers=auth_headers
+        )
+        assert resp.status_code == 200
+        body = resp.json()
+
+        # Verify grouped totals exceed grand_total
+        grouped_sum = sum(g["total"] for g in body["groups"])
+        assert grouped_sum == 250.0  # 150 + 100
+        assert grouped_sum > body["grand_total"]
+
+        # Verify grouped counts exceed total_count
+        grouped_count_sum = sum(g["count"] for g in body["groups"])
+        assert grouped_count_sum == 3  # 2 + 1
+        assert grouped_count_sum > body["total_count"]
+
+    def test_summary_cross_product_grouping(
+        self,
+        test_client_with_mocks: TestClient,
+        auth_headers: dict[str, str],
+        mock_database_client: AsyncMock,
+    ) -> None:
+        """Test cross-product grouping with both exploded dimensions."""
+        # Mock response with 4 groups from 2x2 cross-product
+        mock_database_client.get_gastos_summary.return_value = (
+            [
+                {
+                    "key": {"category": "Food", "persona": "Franco"},
+                    "total": 100.0,
+                    "count": 1,
+                },
+                {
+                    "key": {"category": "Food", "persona": "Mica"},
+                    "total": 100.0,
+                    "count": 1,
+                },
+                {
+                    "key": {"category": "Groceries", "persona": "Franco"},
+                    "total": 100.0,
+                    "count": 1,
+                },
+                {
+                    "key": {"category": "Groceries", "persona": "Mica"},
+                    "total": 100.0,
+                    "count": 1,
+                },
+            ],
+            100.0,  # grand_total (pre-explosion, single gasto)
+            1,  # total_count (pre-explosion, single gasto)
+        )
+
+        resp = test_client_with_mocks.get(
+            "/api/gastos/summary?group_by=category,persona", headers=auth_headers
+        )
+        assert resp.status_code == 200
+        body = resp.json()
+
+        # Should have 4 groups
+        assert len(body["groups"]) == 4
+
+        # All groups should have same total/count (same gasto in all)
+        for group in body["groups"]:
+            assert group["total"] == 100.0
+            assert group["count"] == 1
+            assert "category" in group["key"]
+            assert "persona" in group["key"]
+
+        # Verify all combinations exist
+        combinations = [
+            (g["key"]["category"], g["key"]["persona"]) for g in body["groups"]
+        ]
+        assert ("Food", "Franco") in combinations
+        assert ("Food", "Mica") in combinations
+        assert ("Groceries", "Franco") in combinations
+        assert ("Groceries", "Mica") in combinations
+
+        # Verify grouped totals significantly exceed grand_total
+        grouped_sum = sum(g["total"] for g in body["groups"])
+        assert grouped_sum == 400.0  # 100 × 4 groups
+        assert grouped_sum > body["grand_total"]
+
+    def test_summary_exploded_with_filters(
+        self,
+        test_client_with_mocks: TestClient,
+        auth_headers: dict[str, str],
+        mock_database_client: AsyncMock,
+    ) -> None:
+        """Test exploded grouping works correctly with filters."""
+        # Mock response with filtered exploded grouping
+        mock_database_client.get_gastos_summary.return_value = (
+            [
+                {"key": {"category": "Food"}, "total": 100.0, "count": 1},
+                {"key": {"category": "Groceries"}, "total": 100.0, "count": 1},
+            ],
+            100.0,  # grand_total (single gasto, pre-explosion)
+            1,  # total_count
+        )
+
+        resp = test_client_with_mocks.get(
+            "/api/gastos/summary?group_by=category&date_from=2026-01-01&date_to=2026-01-31",
+            headers=auth_headers,
+        )
+        assert resp.status_code == 200
+        body = resp.json()
+
+        # Verify filters were passed to database
+        call_args = mock_database_client.get_gastos_summary.call_args
+        assert call_args.kwargs["group_by"] == ["category"]
+        assert call_args.kwargs["date_from"] == "2026-01-01"
+        assert call_args.kwargs["date_to"] == "2026-01-31"
+
+        # Verify exploded grouping still works with filters
+        assert len(body["groups"]) == 2
+        grouped_sum = sum(g["total"] for g in body["groups"])
+        assert grouped_sum == 200.0  # 100 + 100 (exploded)
+        assert grouped_sum > body["grand_total"]
+
+    def test_summary_multi_dimension_with_filters(
+        self,
+        test_client_with_mocks: TestClient,
+        auth_headers: dict[str, str],
+        mock_database_client: AsyncMock,
+    ) -> None:
+        """Test multi-dimension grouping works correctly with filters."""
+        # Mock response with multi-dimension grouping + filters
+        mock_database_client.get_gastos_summary.return_value = (
+            [
+                {
+                    "key": {"category": "Food", "persona": "John"},
+                    "total": 80.0,
+                    "count": 1,
+                },
+                {
+                    "key": {"category": "Food", "persona": "Jane"},
+                    "total": 40.0,
+                    "count": 1,
+                },
+            ],
+            120.0,  # grand_total
+            2,  # total_count
+        )
+
+        resp = test_client_with_mocks.get(
+            "/api/gastos/summary?group_by=category,persona&ciudad=Rome&amount_min=10",
+            headers=auth_headers,
+        )
+        assert resp.status_code == 200
+        body = resp.json()
+
+        # Verify filters were passed to database
+        call_args = mock_database_client.get_gastos_summary.call_args
+        assert call_args.kwargs["group_by"] == ["category", "persona"]
+        assert call_args.kwargs["ciudad"] == "Rome"
+        assert call_args.kwargs["amount_min"] == 10.0
+
+        # Verify multi-dimension grouping works with filters
+        assert len(body["groups"]) == 2
+        assert body["grand_total"] == 120.0
+        assert body["total_count"] == 2
+
     def test_summary_invalid_date_format(
         self,
         test_client_with_mocks: TestClient,

@@ -48,13 +48,17 @@ The gastos feature provides local SQLite storage for Notion Gastos entries with 
 | `payment_method` | TEXT | Yes | Payment method (select value) |
 | `description` | TEXT | Yes | Description (from Expense property) |
 | `category` | TEXT | Yes | Category (comma-separated multi-select) |
+| `persona` | TEXT | Yes | Persona (comma-separated multi-select) |
 | `amount` | REAL | Yes | Amount |
 | `date` | DATE | Yes | Date in YYYY-MM-DD format |
+| `ciudad_page_id` | TEXT | Yes | Notion page ID of related Ciudad |
+| `ciudad` | TEXT | Yes | City name (from Ciudad relation) |
 | `created_at` | TIMESTAMP | No | Creation timestamp |
 | `updated_at` | TIMESTAMP | No | Last update timestamp |
 
 **Indexes**:
 - Primary key on `page_id` (automatic)
+- FTS table on `description`, `category`, `persona` (for full-text search)
 
 ### fail_log Table
 
@@ -82,6 +86,7 @@ The gastos feature provides local SQLite storage for Notion Gastos entries with 
 | **Date** | date | `date` | Extract start date, format as YYYY-MM-DD |
 | **Payment Method** | select | `payment_method` | Select name value |
 | **Persona** | multi_select/select | `persona` | Comma-separated if multiple values |
+| **Ciudad** | relation | `ciudad_page_id`, `ciudad` | Relation to Ciudades database; stores page ID and city name |
 
 ### Property Extraction Details
 
@@ -389,6 +394,257 @@ curl -H "X-Calvo-Key: your-secret-key" \
 - When using `q`, other filters (date_from, date_to, persona, payment_method, category, amount_min, amount_max) are ignored
 - `total_count` reflects the number of results returned (not total matching records)
 
+### GET /api/gastos/totals
+
+Get aggregate totals for filtered gastos.
+
+**Authentication**: Required (X-Calvo-Key)
+
+**Query Parameters**:
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `q` | string | Full-text search query over description, category, persona |
+| `date_from` | string | Inclusive start date (YYYY-MM-DD) |
+| `date_to` | string | Inclusive end date (YYYY-MM-DD) |
+| `persona` | string | Filter by persona (exact match) |
+| `payment_method` | string | Filter by payment method (exact match) |
+| `category` | string | Filter by category (contains match) |
+| `amount_min` | float | Minimum amount |
+| `amount_max` | float | Maximum amount |
+| `ciudad` | string | Filter by city name (exact match) |
+
+**Important**: Unlike the list endpoint, aggregate endpoints combine ALL filters together, including FTS (`q`) and structured filters.
+
+**Response (200 OK)**:
+```json
+{
+  "total": 1250.75,
+  "count": 15,
+  "min": 4.50,
+  "max": 250.00,
+  "avg": 83.38
+}
+```
+
+**Zero-result response**:
+```json
+{
+  "total": 0.0,
+  "count": 0,
+  "min": 0.0,
+  "max": 0.0,
+  "avg": 0.0
+}
+```
+
+**Examples**:
+
+Get totals for all gastos:
+```bash
+curl -H "X-Calvo-Key: your-secret-key" \
+  "https://your-server.com/api/gastos/totals"
+```
+
+Filter by date range and city:
+```bash
+curl -H "X-Calvo-Key: your-secret-key" \
+  "https://your-server.com/api/gastos/totals?date_from=2026-01-01&date_to=2026-01-31&ciudad=Buenos%20Aires"
+```
+
+Combine FTS with structured filters:
+```bash
+curl -H "X-Calvo-Key: your-secret-key" \
+  "https://your-server.com/api/gastos/totals?q=restaurant&category=Food&amount_min=50"
+```
+
+**Error Responses**:
+
+400 Bad Request (invalid date format):
+```json
+{
+  "detail": "Invalid date_from format. Expected YYYY-MM-DD (strict), got '2026-1-1'"
+}
+```
+
+400 Bad Request (invalid date range):
+```json
+{
+  "detail": "Invalid date range: date_from (2026-12-01) cannot be after date_to (2026-01-01)"
+}
+```
+
+### GET /api/gastos/summary
+
+Get grouped aggregates for filtered gastos.
+
+**Authentication**: Required (X-Calvo-Key)
+
+**Query Parameters**:
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `q` | string | Full-text search query over description, category, persona |
+| `date_from` | string | Inclusive start date (YYYY-MM-DD) |
+| `date_to` | string | Inclusive end date (YYYY-MM-DD) |
+| `persona` | string | Filter by persona (exact match) |
+| `payment_method` | string | Filter by payment method (exact match) |
+| `category` | string | Filter by category (contains match) |
+| `amount_min` | float | Minimum amount |
+| `amount_max` | float | Maximum amount |
+| `ciudad` | string | Filter by city name (exact match) |
+| `group_by` | string | Grouping dimension(s): `category`, `persona`, `date`, `ciudad` (comma-separated for multi-dimension) |
+
+**Important**: Unlike the list endpoint, aggregate endpoints combine ALL filters together, including FTS (`q`) and structured filters.
+
+**Grouping Dimensions**:
+- `category`: Groups by category. **Exploded**: multi-value categories are split into separate buckets.
+- `persona`: Groups by persona. **Exploded**: multi-value personas are split into separate buckets.
+- `date`: Groups by date (day-level granularity).
+- `ciudad`: Groups by city.
+
+**Multi-dimension Grouping**:
+Use comma-separated values for cross-dimension grouping:
+- `group_by=category` - Single dimension
+- `group_by=category,persona` - Two dimensions
+- `group_by=date,ciudad,persona` - Three dimensions
+
+**Exploded Grouping Behavior**:
+
+When grouping by `category` or `persona`, the API "explodes" multi-value fields into separate buckets:
+
+- A gasto with `category="Food, Groceries"` contributes to **both** "Food" and "Groceries" groups.
+- A gasto with `persona="Franco, Mica"` contributes to **both** "Franco" and "Mica" groups.
+- Multi-dimension grouping creates cross-products: `category="Food, Groceries"` + `persona="Franco, Mica"` creates 4 groups.
+
+**Critical**: Because of exploded grouping, **the sum of group totals/counts may exceed `grand_total` and `total_count`**. This is expected behavior—a single gasto can contribute to multiple groups.
+
+**Response (200 OK)** - Single dimension:
+```json
+{
+  "groups": [
+    {
+      "key": { "category": "Food" },
+      "total": 450.25,
+      "count": 8
+    },
+    {
+      "key": { "category": "Transport" },
+      "total": 120.00,
+      "count": 5
+    },
+    {
+      "key": { "category": "Unknown" },
+      "total": 50.00,
+      "count": 2
+    }
+  ],
+  "grand_total": 620.25,
+  "total_count": 15
+}
+```
+
+**Response (200 OK)** - Multi-dimension:
+```json
+{
+  "groups": [
+    {
+      "key": { "category": "Food", "persona": "Franco" },
+      "total": 300.00,
+      "count": 5
+    },
+    {
+      "key": { "category": "Food", "persona": "Mica" },
+      "total": 150.25,
+      "count": 3
+    },
+    {
+      "key": { "category": "Transport", "persona": "Franco" },
+      "total": 80.00,
+      "count": 3
+    },
+    {
+      "key": { "category": "Transport", "persona": "Mica" },
+      "total": 40.00,
+      "count": 2
+    }
+  ],
+  "grand_total": 450.25,
+  "total_count": 10
+}
+```
+
+Note: In the example above, if a gasto has `category="Food"` and `persona="Franco, Mica"`, it contributes to BOTH "Food×Franco" and "Food×Mica" groups. This is why group totals (300 + 150 + 80 + 40 = 570) exceed `grand_total` (450.25).
+
+**Zero-result response**:
+```json
+{
+  "groups": [],
+  "grand_total": 0.0,
+  "total_count": 0
+}
+```
+
+**Sorting**:
+- If `date` is a grouping dimension: sorted **ascending** by date
+- Otherwise: sorted **descending** by total
+
+**Missing Values**:
+Values that are null/missing are grouped under `"Unknown"`.
+
+**Examples**:
+
+Group by category:
+```bash
+curl -H "X-Calvo-Key: your-secret-key" \
+  "https://your-server.com/api/gastos/summary?group_by=category"
+```
+
+Group by date with filters:
+```bash
+curl -H "X-Calvo-Key: your-secret-key" \
+  "https://your-server.com/api/gastos/summary?group_by=date&date_from=2026-01-01&date_to=2026-01-31"
+```
+
+Multi-dimension grouping:
+```bash
+curl -H "X-Calvo-Key: your-secret-key" \
+  "https://your-server.com/api/gastos/summary?group_by=category,persona"
+```
+
+Group by city:
+```bash
+curl -H "X-Calvo-Key: your-secret-key" \
+  "https://your-server.com/api/gastos/summary?group_by=ciudad"
+```
+
+Combine FTS with grouping:
+```bash
+curl -H "X-Calvo-Key: your-secret-key" \
+  "https://your-server.com/api/gastos/summary?group_by=category&q=restaurant"
+```
+
+**Error Responses**:
+
+400 Bad Request (invalid group_by):
+```json
+{
+  "detail": "Invalid group_by value(s): invalid_dim. Allowed values: category, ciudad, date, persona"
+}
+```
+
+400 Bad Request (duplicate dimension):
+```json
+{
+  "detail": "Duplicate group_by dimension(s) not allowed: category"
+}
+```
+
+400 Bad Request (invalid date format):
+```json
+{
+  "detail": "Invalid date_from format. Expected YYYY-MM-DD (strict), got '2026-1-1'"
+}
+```
+
 ### GET /api/gastos/{page_id}
 
 Get a single gasto by page_id from SQLite database.
@@ -467,13 +723,18 @@ GET /api/gastos?q=rest*  # Matches "restaurant", "rest"
 | `payment_method` | TEXT | Yes | Payment method (select value) |
 | `description` | TEXT | Yes | Description (from Expense property) |
 | `category` | TEXT | Yes | Category (comma-separated multi-select) |
-| `persona` | TEXT | Yes | Persona (comma-separated multi/select) |
+| `persona` | TEXT | Yes | Persona (comma-separated multi-select) |
 | `amount` | REAL | Yes | Amount |
 | `date` | DATE | Yes | Date in YYYY-MM-DD format |
+| `ciudad_page_id` | TEXT | Yes | Notion page ID of related Ciudad |
+| `ciudad` | TEXT | Yes | City name (from Ciudad relation) |
 | `created_at` | TIMESTAMP | No | Creation timestamp |
 | `updated_at` | TIMESTAMP | No | Last update timestamp |
 
-**New Column**: `persona` - Stores persona information from Notion
+**New Columns**:
+- `persona` - Stores persona information from Notion
+- `ciudad_page_id` - Notion page ID of the related Ciudad
+- `ciudad` - City name extracted from the Notion Ciudad relation
 
 **Indexes**:
 - Primary key on `page_id` (automatic)
@@ -561,7 +822,7 @@ uv run pytest --cov=src/notion_hook --cov-report=html
 ### Test Coverage
 
 All gastos feature code has comprehensive test coverage:
-- Property parsing (Expense, Category, Amount, Date, Payment Method, Persona)
+- Property parsing (Expense, Category, Amount, Date, Payment Method, Persona, Ciudad)
 - CRUD operations (create, update, delete, list)
 - Retry logic and failure handling
 - Full and incremental reload
@@ -570,6 +831,13 @@ All gastos feature code has comprehensive test coverage:
 - REST API endpoints (POST, GET list, GET single)
 - Full-text search and filtering
 - Authentication and error handling
+- Aggregate endpoints (`/totals`, `/summary`)
+- Exploded grouping for category and persona
+- Multi-dimension grouping
+- Filter combination with FTS in aggregate endpoints
+- Edge cases (exploded grouping + filters, multi-dimension + filters)
+- Zero-result behavior
+- Invalid parameter validation
 
 ## Configuration
 
@@ -669,8 +937,9 @@ LIMIT 20;
 - Add backup/restore functionality
 - Implement data validation rules
 - Add historical audit trail
-- Add analytics queries
+- Add time-based grouping (week/month/year) for summary endpoint
 - Create admin interface for viewing data
 - Support for selective reload (by date range)
 - Export reload results to file
 - Persistent job tracking across server restarts
+- Add pagination to summary endpoint for large result sets

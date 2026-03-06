@@ -321,18 +321,23 @@ class TestValidateGroupBy:
         result = validate_group_by("category")
         assert result == ["category"]
 
-    def test_multiple_valid_dimensions(self) -> None:
-        """Test multiple valid dimensions."""
+    def test_single_dimension_with_spaces(self) -> None:
+        """Test single dimension with spaces is trimmed correctly."""
+        result = validate_group_by("  category  ")
+        assert result == ["category"]
+
+    def test_multiple_valid_dimensions_accepted(self) -> None:
+        """Test multiple valid dimensions accepted (Step 6 multi-dimension)."""
         result = validate_group_by("category,persona")
         assert result == ["category", "persona"]
 
-    def test_dimensions_with_spaces(self) -> None:
-        """Test that spaces are trimmed."""
+    def test_dimensions_with_spaces_accepted(self) -> None:
+        """Test multiple dimensions with spaces accepted (Step 6)."""
         result = validate_group_by(" category , persona , date ")
         assert result == ["category", "persona", "date"]
 
-    def test_all_valid_dimensions(self) -> None:
-        """Test all valid dimensions."""
+    def test_all_valid_dimensions_accepted(self) -> None:
+        """Test all valid dimensions accepted (Step 6 multi-dimension)."""
         result = validate_group_by("category,persona,date,ciudad")
         assert result == ["category", "persona", "date", "ciudad"]
 

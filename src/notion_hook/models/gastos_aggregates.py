@@ -248,14 +248,17 @@ async def get_aggregate_filters(
 def validate_group_by(group_by: str | None) -> list[str]:
     """Validate and parse group_by parameter.
 
+    Supports single or multiple grouping dimensions (comma-separated).
+    Multi-value explosion is applied for 'category' and 'persona' dimensions.
+
     Args:
-        group_by: Comma-separated list of grouping dimensions.
+        group_by: Comma-separated grouping dimensions (e.g., "category,persona").
 
     Returns:
         List of validated group_by dimensions.
 
     Raises:
-        HTTPException: If any group_by value is invalid or duplicates are present.
+        HTTPException: If group_by value is invalid or duplicates are present.
     """
     if group_by is None:
         return []
@@ -300,17 +303,18 @@ def validate_group_by(group_by: str | None) -> list[str]:
 async def get_group_by(
     group_by: str | None = Query(
         None,
-        description="Grouping dimension(s): category, persona, date, ciudad "
-        "(comma-separated for multi-dimension)",
+        description="Grouping dimension(s): category, persona, date, or ciudad "
+        "(comma-separated for multi-dimension, e.g., 'category,persona')",
     ),
 ) -> list[str]:
     """FastAPI dependency for validating group_by parameter.
 
     Args:
-        group_by: Comma-separated list of grouping dimensions.
+        group_by: Comma-separated grouping dimension(s). Supports single or
+            multiple dimensions (e.g., 'category' or 'category,persona').
 
     Returns:
-        List of validated group_by dimensions.
+        List of validated group_by dimensions (may be empty if group_by is None).
     """
     return validate_group_by(group_by)
 

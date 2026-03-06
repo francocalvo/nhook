@@ -315,25 +315,33 @@ async def get_gastos_summary(
     Unlike the list endpoint, aggregate endpoints combine ALL filters together,
     including FTS (q) and structured filters.
 
-    **Step 5**: Single-dimension grouping only (no exploded grouping yet).
-    Multi-dimension grouping and exploded category/persona will be in Step 6.
+    **Multi-dimension grouping**:
+    Supports single or multiple dimensions (comma-separated).
+    Example: `group_by=category,persona` groups by both dimensions.
 
-    **Grouping dimensions**:
-    - `category`: Group by category (no explosion in Step 5)
-    - `persona`: Group by persona (no explosion in Step 5)
+    **Exploded grouping**:
+    - `category` and `persona` fields are split into individual buckets.
+    - Multi-value fields (comma-separated) create cross-product groups.
+    - Example: `category="Food, Groceries"` and `persona="Franco, Mica"` creates
+      4 groups: Food×Franco, Food×Mica, Groceries×Franco, Groceries×Mica.
+    - A single gasto can contribute to multiple groups when exploded.
+    - **Important**: The sum of group totals/counts may exceed grand_total/total_count
+      when exploded dimensions are used.
+
+    **Non-exploded dimensions**:
     - `date`: Group by date (day-level granularity)
     - `ciudad`: Group by city
 
     **Sorting**:
-    - Date groups: sorted ascending by date
-    - Other groups: sorted descending by total
+    - If `date` is a grouping dimension: sorted ascending by date
+    - Otherwise: sorted descending by total
 
     **Missing values**: Grouped under "Unknown"
 
-    **Note on exploded grouping** (Step 6):
-    When grouping by category or persona in Step 6, multi-value fields will
-    be split and a single gasto can contribute to multiple groups. This means
-    the sum of group totals/counts may exceed grand_total/total_count.
+    **Grand totals**:
+    - `grand_total` and `total_count` reflect the filtered base set BEFORE explosion.
+    - This means they represent the true sum/count of matching gastos, not the
+      sum of exploded group totals.
 
     Args:
         db: The database client (from dependency).

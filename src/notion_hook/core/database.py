@@ -71,24 +71,7 @@ class DatabaseClient:
 
     async def _create_tables(self) -> None:
         """Create database schema."""
-        await self.conn.execute(
-            """
-            CREATE TABLE IF NOT EXISTS gastos (
-                page_id TEXT PRIMARY KEY,
-                payment_method TEXT,
-                description TEXT,
-                category TEXT,
-                amount REAL,
-                date DATE,
-                persona TEXT,
-                ciudad_page_id TEXT,
-                ciudad TEXT,
-                created_at TIMESTAMP NOT NULL,
-                updated_at TIMESTAMP NOT NULL
-            )
-        """
-        )
-        await self._ensure_gastos_schema()
+        # Create ciudades first so gastos can reference it
         await self.conn.execute(
             """
             CREATE TABLE IF NOT EXISTS ciudades (
@@ -99,6 +82,24 @@ class DatabaseClient:
             )
         """
         )
+        await self.conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS gastos (
+                page_id TEXT PRIMARY KEY,
+                payment_method TEXT,
+                description TEXT,
+                category TEXT,
+                amount REAL,
+                date DATE,
+                persona TEXT,
+                ciudad_page_id TEXT REFERENCES ciudades(page_id) ON DELETE SET NULL,
+                ciudad TEXT,
+                created_at TIMESTAMP NOT NULL,
+                updated_at TIMESTAMP NOT NULL
+            )
+        """
+        )
+        await self._ensure_gastos_schema()
         await self.conn.execute(
             """
             CREATE TABLE IF NOT EXISTS cronograma (
@@ -192,7 +193,7 @@ class DatabaseClient:
         await self.conn.commit()
 
     async def _ensure_gastos_schema(self) -> None:
-        """Ensure gastos table has expected columns."""
+        """Ensure gastos table has expected columns and foreign key constraints."""
         async with self.conn.execute("PRAGMA table_info(gastos)") as cursor:
             rows = await cursor.fetchall()
             existing = {row[1] for row in rows}
@@ -205,6 +206,59 @@ class DatabaseClient:
             await self.conn.execute("ALTER TABLE gastos ADD COLUMN ciudad_page_id TEXT")
         if "ciudad" not in existing:
             await self.conn.execute("ALTER TABLE gastos ADD COLUMN ciudad TEXT")
+
+        # Check if FK constraint exists from ciudad_page_id to ciudades
+        async with self.conn.execute("PRAGMA foreign_key_list(gastos)") as cursor:
+            fk_rows = await cursor.fetchall()
+            has_fk = any(
+                fk[3] == "ciudad_page_id" and fk[2] == "ciudades" for fk in fk_rows
+            )
+
+        # If FK constraint doesn't exist, recreate the table
+        if not has_fk:
+            logger.info("Adding foreign key constraint to gastos.ciudad_page_id")
+            # Clean up any stale table from prior failed migration
+            await self.conn.execute("DROP TABLE IF EXISTS gastos_new")
+            # Create a new table with the FK constraint
+            await self.conn.execute(
+                """
+                CREATE TABLE gastos_new (
+                    page_id TEXT PRIMARY KEY,
+                    payment_method TEXT,
+                    description TEXT,
+                    category TEXT,
+                    amount REAL,
+                    date DATE,
+                    persona TEXT,
+                    ciudad_page_id TEXT REFERENCES ciudades(page_id) ON DELETE SET NULL,
+                    ciudad TEXT,
+                    created_at TIMESTAMP NOT NULL,
+                    updated_at TIMESTAMP NOT NULL
+                )
+            """
+            )
+            # Copy data from old table, NULLing invalid ciudad_page_id references
+            await self.conn.execute(
+                """
+                INSERT INTO gastos_new
+                SELECT page_id, payment_method, description, category, amount, date,
+                       persona,
+                       CASE
+                           WHEN ciudad_page_id IS NULL THEN NULL
+                           WHEN EXISTS (
+                               SELECT 1 FROM ciudades c
+                               WHERE c.page_id = gastos.ciudad_page_id
+                           ) THEN ciudad_page_id
+                           ELSE NULL
+                       END,
+                       ciudad, created_at, updated_at
+                FROM gastos
+            """
+            )
+            # Drop old table and rename new one
+            await self.conn.execute("DROP TABLE gastos")
+            await self.conn.execute("ALTER TABLE gastos_new RENAME TO gastos")
+            await self.conn.commit()
 
     async def get_gasto(self, page_id: str) -> Gasto | None:
         """Retrieve a single gasto by page_id.

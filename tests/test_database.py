@@ -72,6 +72,15 @@ class TestDatabaseClient:
         self, db_client: DatabaseClient
     ) -> None:
         """Test creating a gasto with city fields."""
+        # Create the ciudad first (required for FK constraint)
+        ciudad = Ciudad(
+            page_id="city-rome-123",
+            name="Rome",
+            created_at="2024-01-01T00:00:00Z",
+            updated_at="2024-01-01T00:00:00Z",
+        )
+        await db_client.create_ciudad(ciudad)
+
         gasto = Gasto(
             page_id="test-page-city-1",
             payment_method="Cash",
@@ -140,6 +149,15 @@ class TestDatabaseClient:
             assert gasto.ciudad_page_id is None
             assert gasto.ciudad is None
 
+            # Create a ciudad first (required for FK constraint)
+            ciudad = Ciudad(
+                page_id="city-rome-456",
+                name="Rome",
+                created_at="2024-01-02T00:00:00Z",
+                updated_at="2024-01-02T00:00:00Z",
+            )
+            await client.create_ciudad(ciudad)
+
             # Verify we can create new rows with ciudad fields
             new_gasto = Gasto(
                 page_id="new-page-1",
@@ -164,6 +182,15 @@ class TestDatabaseClient:
     @pytest.mark.asyncio
     async def test_update_gasto(self, db_client: DatabaseClient) -> None:
         """Test updating a gasto."""
+        # Create a ciudad first (required for FK constraint)
+        ciudad = Ciudad(
+            page_id="city-rome-123",
+            name="Rome",
+            created_at="2024-01-01T00:00:00Z",
+            updated_at="2024-01-01T00:00:00Z",
+        )
+        await db_client.create_ciudad(ciudad)
+
         gasto = Gasto(
             page_id="test-page-3",
             payment_method="Cash",
@@ -746,3 +773,480 @@ class TestDatabaseClient:
         assert deleted["pasajes"] == 1
         assert deleted["cronograma"] == 1
         assert deleted["ciudades"] == 1
+
+    @pytest.mark.asyncio
+    async def test_gastos_foreign_key_constraint_exists(
+        self, db_client: DatabaseClient
+    ) -> None:
+        """Test that foreign key constraint exists on gastos.ciudad_page_id."""
+        async with db_client.conn.execute("PRAGMA foreign_key_list(gastos)") as cursor:
+            fk_rows = await cursor.fetchall()
+            # Check that FK constraint exists from ciudad_page_id to ciudades
+            has_fk = any(
+                fk[3] == "ciudad_page_id" and fk[2] == "ciudades" for fk in fk_rows
+            )
+            assert has_fk, (
+                "Foreign key constraint from gastos.ciudad_page_id "
+                "to ciudades.page_id should exist"
+            )
+
+    @pytest.mark.asyncio
+    async def test_gastos_foreign_key_constraint_enforcement(
+        self, db_client: DatabaseClient
+    ) -> None:
+        """Test that foreign key constraint on gastos.ciudad_page_id is enforced."""
+        # Create a ciudad
+        ciudad = Ciudad(
+            page_id="city-rome",
+            name="Rome",
+            created_at="2024-01-01T00:00:00Z",
+            updated_at="2024-01-01T00:00:00Z",
+        )
+        await db_client.create_ciudad(ciudad)
+
+        # Create a gasto with valid ciudad_page_id - should succeed
+        gasto_valid = Gasto(
+            page_id="gasto-1",
+            payment_method="Cash",
+            description="Valid gasto",
+            category="Food",
+            amount=50.0,
+            date="2024-01-01",
+            persona="Franco",
+            ciudad_page_id="city-rome",
+            ciudad="Rome",
+            created_at="2024-01-01T00:00:00Z",
+            updated_at="2024-01-01T00:00:00Z",
+        )
+        await db_client.create_gasto(gasto_valid)
+        retrieved = await db_client.get_gasto("gasto-1")
+        assert retrieved is not None
+        assert retrieved.ciudad_page_id == "city-rome"
+
+        # Try to create a gasto with invalid ciudad_page_id - should fail
+        gasto_invalid = Gasto(
+            page_id="gasto-2",
+            payment_method="Cash",
+            description="Invalid gasto",
+            category="Food",
+            amount=50.0,
+            date="2024-01-01",
+            persona="Franco",
+            ciudad_page_id="nonexistent-city",
+            ciudad="Nonexistent",
+            created_at="2024-01-01T00:00:00Z",
+            updated_at="2024-01-01T00:00:00Z",
+        )
+        with pytest.raises(Exception) as exc_info:
+            await db_client.create_gasto(gasto_invalid)
+        # Verify error contains "FOREIGN KEY constraint failed"
+        error_str = str(exc_info.value)
+        assert "FOREIGN KEY" in error_str or "foreign key" in error_str
+
+    @pytest.mark.asyncio
+    async def test_gastos_foreign_key_on_delete_set_null(
+        self, db_client: DatabaseClient
+    ) -> None:
+        """Test that ON DELETE SET NULL works for gastos.ciudad_page_id."""
+        # Create a ciudad
+        ciudad = Ciudad(
+            page_id="city-rome",
+            name="Rome",
+            created_at="2024-01-01T00:00:00Z",
+            updated_at="2024-01-01T00:00:00Z",
+        )
+        await db_client.create_ciudad(ciudad)
+
+        # Create a gasto with ciudad reference
+        gasto = Gasto(
+            page_id="gasto-1",
+            payment_method="Cash",
+            description="Gasto in Rome",
+            category="Food",
+            amount=50.0,
+            date="2024-01-01",
+            persona="Franco",
+            ciudad_page_id="city-rome",
+            ciudad="Rome",
+            created_at="2024-01-01T00:00:00Z",
+            updated_at="2024-01-01T00:00:00Z",
+        )
+        await db_client.create_gasto(gasto)
+
+        # Verify gasto has ciudad reference
+        retrieved = await db_client.get_gasto("gasto-1")
+        assert retrieved is not None
+        assert retrieved.ciudad_page_id == "city-rome"
+        assert retrieved.ciudad == "Rome"
+
+        # Delete the ciudad
+        await db_client.delete_ciudad("city-rome")
+
+        # Verify gasto's ciudad_page_id is now NULL (ON DELETE SET NULL)
+        retrieved_after = await db_client.get_gasto("gasto-1")
+        assert retrieved_after is not None
+        assert retrieved_after.ciudad_page_id is None
+        # Note: ciudad field is not automatically updated,
+        # it's just the FK that's set to NULL
+
+    @pytest.mark.asyncio
+    async def test_gastos_schema_migration_adds_fk_constraint(
+        self, settings: Settings
+    ) -> None:
+        """Test that schema migration adds FK constraint to existing gastos table."""
+        # Create a database with old schema (without FK constraint)
+        async with aiosqlite.connect(settings.database_path) as conn:
+            await conn.execute("PRAGMA foreign_keys = ON")
+            # Create ciudades table
+            await conn.execute("""
+                CREATE TABLE ciudades (
+                    page_id TEXT PRIMARY KEY,
+                    name TEXT,
+                    created_at TIMESTAMP NOT NULL,
+                    updated_at TIMESTAMP NOT NULL
+                )
+            """)
+            # Create gastos table without FK constraint
+            await conn.execute("""
+                CREATE TABLE gastos (
+                    page_id TEXT PRIMARY KEY,
+                    payment_method TEXT,
+                    description TEXT,
+                    category TEXT,
+                    amount REAL,
+                    date DATE,
+                    persona TEXT,
+                    ciudad_page_id TEXT,
+                    ciudad TEXT,
+                    created_at TIMESTAMP NOT NULL,
+                    updated_at TIMESTAMP NOT NULL
+                )
+            """)
+            # Insert a test row
+            await conn.execute(
+                """INSERT INTO gastos (
+                    page_id, payment_method, description, category, amount, date,
+                    persona, ciudad_page_id, ciudad, created_at, updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                (
+                    "old-gasto-1",
+                    "Cash",
+                    "Old expense",
+                    "Food",
+                    100.0,
+                    "2024-01-01",
+                    "Franco",
+                    None,
+                    None,
+                    "2024-01-01T00:00:00Z",
+                    "2024-01-01T00:00:00Z",
+                ),
+            )
+            await conn.commit()
+
+            # Verify FK constraint doesn't exist
+            async with conn.execute("PRAGMA foreign_key_list(gastos)") as cursor:
+                rows = await cursor.fetchall()
+                assert len(rows) == 0
+
+        # Initialize database client (should run migration and add FK constraint)
+        async with DatabaseClient(settings) as client:
+            # Verify the old row still exists
+            gasto = await client.get_gasto("old-gasto-1")
+            assert gasto is not None
+            assert gasto.page_id == "old-gasto-1"
+            assert gasto.ciudad_page_id is None
+
+            # Verify FK constraint now exists
+            async with client.conn.execute("PRAGMA foreign_key_list(gastos)") as cursor:
+                fk_rows = await cursor.fetchall()
+                has_fk = any(
+                    fk[3] == "ciudad_page_id" and fk[2] == "ciudades" for fk in fk_rows
+                )
+                assert has_fk, "Migration should add FK constraint"
+
+            # Create a ciudad and verify we can now create gastos with valid references
+            ciudad = Ciudad(
+                page_id="city-madrid",
+                name="Madrid",
+                created_at="2024-01-02T00:00:00Z",
+                updated_at="2024-01-02T00:00:00Z",
+            )
+            await client.create_ciudad(ciudad)
+
+            new_gasto = Gasto(
+                page_id="new-gasto-1",
+                payment_method="Credit Card",
+                description="New expense",
+                category="Transport",
+                amount=50.0,
+                date="2024-01-02",
+                persona="Mica",
+                ciudad_page_id="city-madrid",
+                ciudad="Madrid",
+                created_at="2024-01-02T00:00:00Z",
+                updated_at="2024-01-02T00:00:00Z",
+            )
+            await client.create_gasto(new_gasto)
+
+            retrieved = await client.get_gasto("new-gasto-1")
+            assert retrieved is not None
+            assert retrieved.ciudad_page_id == "city-madrid"
+            assert retrieved.ciudad == "Madrid"
+
+    @pytest.mark.asyncio
+    async def test_gastos_migration_handles_orphan_city_references(
+        self, settings: Settings
+    ) -> None:
+        """Test that migration gracefully handles orphan ciudad_page_id values."""
+        # Create a database with old schema and orphan city references
+        async with aiosqlite.connect(settings.database_path) as conn:
+            await conn.execute("PRAGMA foreign_keys = ON")
+            # Create ciudades table
+            await conn.execute(
+                """
+                CREATE TABLE ciudades (
+                    page_id TEXT PRIMARY KEY,
+                    name TEXT,
+                    created_at TIMESTAMP NOT NULL,
+                    updated_at TIMESTAMP NOT NULL
+                )
+            """
+            )
+            # Create gastos table without FK constraint
+            await conn.execute(
+                """
+                CREATE TABLE gastos (
+                    page_id TEXT PRIMARY KEY,
+                    payment_method TEXT,
+                    description TEXT,
+                    category TEXT,
+                    amount REAL,
+                    date DATE,
+                    persona TEXT,
+                    ciudad_page_id TEXT,
+                    ciudad TEXT,
+                    created_at TIMESTAMP NOT NULL,
+                    updated_at TIMESTAMP NOT NULL
+                )
+            """
+            )
+            # Insert a gasto with orphan ciudad_page_id (non-existent city)
+            await conn.execute(
+                """INSERT INTO gastos (
+                    page_id, payment_method, description, category, amount, date,
+                    persona, ciudad_page_id, ciudad, created_at, updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                (
+                    "orphan-gasto-1",
+                    "Cash",
+                    "Orphan expense",
+                    "Food",
+                    100.0,
+                    "2024-01-01",
+                    "Franco",
+                    "nonexistent-city-id",  # This city doesn't exist in ciudades table
+                    "Ghost City",
+                    "2024-01-01T00:00:00Z",
+                    "2024-01-01T00:00:00Z",
+                ),
+            )
+            # Insert another gasto with valid NULL ciudad_page_id
+            await conn.execute(
+                """INSERT INTO gastos (
+                    page_id, payment_method, description, category, amount, date,
+                    persona, ciudad_page_id, ciudad, created_at, updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                (
+                    "null-city-gasto",
+                    "Credit Card",
+                    "No city expense",
+                    "Transport",
+                    50.0,
+                    "2024-01-02",
+                    "Mica",
+                    None,
+                    None,
+                    "2024-01-02T00:00:00Z",
+                    "2024-01-02T00:00:00Z",
+                ),
+            )
+            await conn.commit()
+
+        # Initialize database client (should run migration without FK constraint errors)
+        async with DatabaseClient(settings) as client:
+            # Verify migration succeeded and orphan reference was nulled
+            orphan_gasto = await client.get_gasto("orphan-gasto-1")
+            assert orphan_gasto is not None
+            assert orphan_gasto.page_id == "orphan-gasto-1"
+            # The orphan ciudad_page_id should have been nulled during migration
+            assert orphan_gasto.ciudad_page_id is None
+
+            # Verify the gasto with original NULL ciudad_page_id is unchanged
+            null_gasto = await client.get_gasto("null-city-gasto")
+            assert null_gasto is not None
+            assert null_gasto.page_id == "null-city-gasto"
+            assert null_gasto.ciudad_page_id is None
+
+            # Verify FK constraint now exists and is enforced
+            async with client.conn.execute("PRAGMA foreign_key_list(gastos)") as cursor:
+                fk_rows = await cursor.fetchall()
+                has_fk = any(
+                    fk[3] == "ciudad_page_id" and fk[2] == "ciudades" for fk in fk_rows
+                )
+                assert has_fk, "Migration should add FK constraint"
+
+            # Create a ciudad and verify we can create gastos with valid references
+            ciudad = Ciudad(
+                page_id="city-barcelona",
+                name="Barcelona",
+                created_at="2024-01-03T00:00:00Z",
+                updated_at="2024-01-03T00:00:00Z",
+            )
+            await client.create_ciudad(ciudad)
+
+            new_gasto = Gasto(
+                page_id="new-gasto-2",
+                payment_method="Debit Card",
+                description="New expense with valid city",
+                category="Food",
+                amount=75.0,
+                date="2024-01-03",
+                persona="Franco",
+                ciudad_page_id="city-barcelona",
+                ciudad="Barcelona",
+                created_at="2024-01-03T00:00:00Z",
+                updated_at="2024-01-03T00:00:00Z",
+            )
+            await client.create_gasto(new_gasto)
+
+            retrieved = await client.get_gasto("new-gasto-2")
+            assert retrieved is not None
+            assert retrieved.ciudad_page_id == "city-barcelona"
+
+    async def test_gastos_migration_handles_stale_gastos_new_table(
+        self, settings: Settings
+    ) -> None:
+        """Test that migration handles stale gastos_new table from prior failed run."""
+        # Create a database with old schema and a stale gastos_new table
+        async with aiosqlite.connect(settings.database_path) as conn:
+            await conn.execute("PRAGMA foreign_keys = ON")
+            # Create ciudades table
+            await conn.execute(
+                """
+                CREATE TABLE ciudades (
+                    page_id TEXT PRIMARY KEY,
+                    name TEXT,
+                    created_at TIMESTAMP NOT NULL,
+                    updated_at TIMESTAMP NOT NULL
+                )
+            """
+            )
+            # Create gastos table without FK constraint
+            await conn.execute(
+                """
+                CREATE TABLE gastos (
+                    page_id TEXT PRIMARY KEY,
+                    payment_method TEXT,
+                    description TEXT,
+                    category TEXT,
+                    amount REAL,
+                    date DATE,
+                    persona TEXT,
+                    ciudad_page_id TEXT,
+                    ciudad TEXT,
+                    created_at TIMESTAMP NOT NULL,
+                    updated_at TIMESTAMP NOT NULL
+                )
+            """
+            )
+            # Create a stale gastos_new table (simulating prior failed migration)
+            await conn.execute(
+                """
+                CREATE TABLE gastos_new (
+                    page_id TEXT PRIMARY KEY,
+                    payment_method TEXT,
+                    description TEXT,
+                    category TEXT,
+                    amount REAL,
+                    date DATE,
+                    persona TEXT,
+                    ciudad_page_id TEXT,
+                    ciudad TEXT,
+                    created_at TIMESTAMP NOT NULL,
+                    updated_at TIMESTAMP NOT NULL
+                )
+            """
+            )
+            # Insert a gasto in the old table
+            await conn.execute(
+                """INSERT INTO gastos (
+                    page_id, payment_method, description, category, amount, date,
+                    persona, ciudad_page_id, ciudad, created_at, updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                (
+                    "test-gasto-1",
+                    "Cash",
+                    "Test expense",
+                    "Food",
+                    100.0,
+                    "2024-01-01",
+                    "Franco",
+                    None,
+                    None,
+                    "2024-01-01T00:00:00Z",
+                    "2024-01-01T00:00:00Z",
+                ),
+            )
+            await conn.commit()
+
+        # Initialize database client (should handle stale table without errors)
+        async with DatabaseClient(settings) as client:
+            # Verify migration succeeded
+            gasto = await client.get_gasto("test-gasto-1")
+            assert gasto is not None
+            assert gasto.page_id == "test-gasto-1"
+
+            # Verify FK constraint now exists and is enforced
+            async with client.conn.execute("PRAGMA foreign_key_list(gastos)") as cursor:
+                fk_rows = await cursor.fetchall()
+                has_fk = any(
+                    fk[3] == "ciudad_page_id" and fk[2] == "ciudades" for fk in fk_rows
+                )
+                assert has_fk, "Migration should add FK constraint"
+
+            # Verify the stale gastos_new table no longer exists
+            async with client.conn.execute(
+                "SELECT name FROM sqlite_master "
+                "WHERE type='table' AND name='gastos_new'"
+            ) as cursor:
+                stale_table = await cursor.fetchone()
+                assert stale_table is None, "Stale gastos_new table should be dropped"
+
+            # Create a ciudad and verify we can create gastos with valid references
+            ciudad = Ciudad(
+                page_id="city-madrid",
+                name="Madrid",
+                created_at="2024-01-02T00:00:00Z",
+                updated_at="2024-01-02T00:00:00Z",
+            )
+            await client.create_ciudad(ciudad)
+
+            new_gasto = Gasto(
+                page_id="new-gasto-3",
+                payment_method="Credit Card",
+                description="New expense with valid city",
+                category="Transport",
+                amount=50.0,
+                date="2024-01-02",
+                persona="Mica",
+                ciudad_page_id="city-madrid",
+                ciudad="Madrid",
+                created_at="2024-01-02T00:00:00Z",
+                updated_at="2024-01-02T00:00:00Z",
+            )
+            await client.create_gasto(new_gasto)
+
+            retrieved = await client.get_gasto("new-gasto-3")
+            assert retrieved is not None
+            assert retrieved.ciudad_page_id == "city-madrid"

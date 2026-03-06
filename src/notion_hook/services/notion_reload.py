@@ -13,6 +13,7 @@ from notion_hook.core.database import DatabaseClient
 from notion_hook.core.logging import get_logger
 from notion_hook.models.gastos import Gasto
 from notion_hook.models.notion_db import Atraccion, Ciudad, Cronograma, Pasaje
+from notion_hook.services.city_resolver import CityResolver
 
 logger = get_logger("services.notion_reload")
 
@@ -130,6 +131,7 @@ class NotionReloadService:
         self._jobs: dict[str, ReloadJob] = {}
         self._tasks: dict[str, asyncio.Task[None]] = {}
         self._lock = asyncio.Lock()
+        self._city_resolver = CityResolver(notion_client, database_client)
 
     async def create_job(
         self,
@@ -298,6 +300,9 @@ class NotionReloadService:
                         f"Failed to parse {table} page {page.get('id', 'unknown')}: {e}"
                     )
 
+            if table == "gastos" and parsed:
+                await self._resolve_gastos_ciudades(parsed)
+
             created, updated, skipped, failed = await syncer(parsed, update_if_changed)
             progress = job.table_progress[table]
             progress.created += created
@@ -310,6 +315,18 @@ class NotionReloadService:
             job.progress.processed += created + updated + skipped
             job.progress.failed += failed + parse_failed
             await self._touch_job(job)
+
+    async def _resolve_gastos_ciudades(self, rows: list[Any]) -> None:
+        """Resolve ciudad names for gasto rows before persisting."""
+        gastos = [row for row in rows if isinstance(row, Gasto)]
+        if not gastos:
+            return
+
+        ciudad_ids = [gasto.ciudad_page_id for gasto in gastos]
+        ciudad_map = await self._city_resolver.resolve_ciudad_names(ciudad_ids)
+        for gasto in gastos:
+            if gasto.ciudad_page_id:
+                gasto.ciudad = ciudad_map.get(gasto.ciudad_page_id)
 
     async def _delete_missing_records(
         self, job: ReloadJob, pages_by_table: dict[str, list[dict[str, Any]]]

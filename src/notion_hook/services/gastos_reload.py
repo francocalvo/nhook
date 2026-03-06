@@ -11,6 +11,7 @@ from notion_hook.clients.notion import NotionClient
 from notion_hook.core.database import DatabaseClient
 from notion_hook.core.logging import get_logger
 from notion_hook.models.gastos import Gasto
+from notion_hook.services.city_resolver import CityResolver
 
 logger = get_logger("services.gastos_reload")
 
@@ -135,6 +136,7 @@ class GastosReloadService:
         self._jobs: dict[str, ReloadJob] = {}
         self._tasks: dict[str, asyncio.Task[None]] = {}
         self._lock = asyncio.Lock()
+        self._city_resolver = CityResolver(notion_client, database_client)
 
     async def create_job(
         self,
@@ -355,6 +357,10 @@ class GastosReloadService:
                     f"Failed to process page {page.get('id', 'unknown')}: {e}"
                 )
 
+        # Resolve ciudad names for all gastos in batch
+        if gastos:
+            await self._resolve_ciudades_batch(gastos)
+
         (
             created,
             updated,
@@ -371,6 +377,21 @@ class GastosReloadService:
         job.progress.failed += failed + parse_failed
 
         await self._touch_job(job)
+
+    async def _resolve_ciudades_batch(self, gastos: list[Gasto]) -> None:
+        """Resolve ciudad names for a batch of gastos.
+
+        Args:
+            gastos: List of gastos with ciudad_page_ids to resolve.
+        """
+        # Collect all unique ciudad_page_ids
+        ciudad_ids = [g.ciudad_page_id for g in gastos]
+        ciudad_map = await self._city_resolver.resolve_ciudad_names(ciudad_ids)
+
+        # Update gastos with resolved ciudad names
+        for gasto in gastos:
+            if gasto.ciudad_page_id:
+                gasto.ciudad = ciudad_map.get(gasto.ciudad_page_id)
 
     async def _touch_job(self, job: ReloadJob) -> None:
         """Touch job timestamp.

@@ -1172,6 +1172,196 @@ class DatabaseClient:
 
         return await self._retry_operation("delete_atraccion", _delete)
 
+    async def list_ciudades(
+        self,
+        name: str | None = None,
+        limit: int = 100,
+        offset: int = 0,
+    ) -> list[Ciudad]:
+        """List ciudades with optional name filter."""
+
+        async def _list() -> list[Ciudad]:
+            where_clauses: list[str] = []
+            params: list[str | int] = []
+
+            if name:
+                where_clauses.append("name LIKE ?")
+                params.append(f"%{name}%")
+
+            where_sql = " AND ".join(where_clauses) if where_clauses else "1=1"
+
+            async with self.conn.execute(
+                f"SELECT page_id, name, created_at, updated_at "
+                f"FROM ciudades WHERE {where_sql} ORDER BY name ASC LIMIT ? OFFSET ?",
+                (*params, limit, offset),
+            ) as cursor:
+                rows = await cursor.fetchall()
+                return [
+                    Ciudad(
+                        page_id=str(row[0]),
+                        name=row[1],
+                        created_at=str(row[2]),
+                        updated_at=str(row[3]),
+                    )
+                    for row in rows
+                ]
+
+        return await self._retry_operation("list_ciudades", _list)
+
+    async def list_cronograma(
+        self,
+        date_from: str | None = None,
+        date_to: str | None = None,
+        ciudad_page_id: str | None = None,
+        limit: int = 100,
+        offset: int = 0,
+    ) -> list[Cronograma]:
+        """List cronograma entries with optional filters."""
+
+        async def _list() -> list[Cronograma]:
+            where_clauses: list[str] = []
+            params: list[str | int] = []
+
+            if date_from:
+                where_clauses.append("day >= ?")
+                params.append(date_from)
+            if date_to:
+                where_clauses.append("day <= ?")
+                params.append(date_to)
+            if ciudad_page_id:
+                where_clauses.append("ciudad_page_id = ?")
+                params.append(ciudad_page_id)
+
+            where_sql = " AND ".join(where_clauses) if where_clauses else "1=1"
+
+            async with self.conn.execute(
+                f"SELECT page_id, day, ciudad_page_id, created_at, updated_at "
+                f"FROM cronograma WHERE {where_sql} ORDER BY day ASC LIMIT ? OFFSET ?",
+                (*params, limit, offset),
+            ) as cursor:
+                rows = await cursor.fetchall()
+                return [
+                    Cronograma(
+                        page_id=str(row[0]),
+                        day=row[1],
+                        ciudad_page_id=row[2],
+                        created_at=str(row[3]),
+                        updated_at=str(row[4]),
+                    )
+                    for row in rows
+                ]
+
+        return await self._retry_operation("list_cronograma", _list)
+
+    async def list_pasajes(
+        self,
+        date_from: str | None = None,
+        date_to: str | None = None,
+        ciudad_page_id: str | None = None,
+        cronograma_page_id: str | None = None,
+        limit: int = 100,
+        offset: int = 0,
+    ) -> list[Pasaje]:
+        """List pasajes with optional filters."""
+
+        async def _list() -> list[Pasaje]:
+            where_clauses: list[str] = []
+            params: list[str | int] = []
+
+            if date_from:
+                where_clauses.append("departure >= ?")
+                params.append(date_from)
+            if date_to:
+                where_clauses.append("departure <= ?")
+                params.append(date_to)
+            if ciudad_page_id:
+                where_clauses.append("ciudad_page_id = ?")
+                params.append(ciudad_page_id)
+            if cronograma_page_id:
+                where_clauses.append("cronograma_page_id = ?")
+                params.append(cronograma_page_id)
+
+            where_sql = " AND ".join(where_clauses) if where_clauses else "1=1"
+
+            async with self.conn.execute(
+                f"SELECT page_id, departure, cronograma_page_id, ciudad_page_id, "
+                f"created_at, updated_at "
+                f"FROM pasajes WHERE {where_sql} "
+                f"ORDER BY departure ASC LIMIT ? OFFSET ?",
+                (*params, limit, offset),
+            ) as cursor:
+                rows = await cursor.fetchall()
+                return [
+                    Pasaje(
+                        page_id=str(row[0]),
+                        departure=row[1],
+                        cronograma_page_id=row[2],
+                        ciudad_page_id=row[3],
+                        created_at=str(row[4]),
+                        updated_at=str(row[5]),
+                    )
+                    for row in rows
+                ]
+
+        return await self._retry_operation("list_pasajes", _list)
+
+    async def list_atracciones(
+        self,
+        name: str | None = None,
+        date_from: str | None = None,
+        date_to: str | None = None,
+        ciudad_page_id: str | None = None,
+        cronograma_page_id: str | None = None,
+        limit: int = 100,
+        offset: int = 0,
+    ) -> list[Atraccion]:
+        """List atracciones with optional filters."""
+
+        async def _list() -> list[Atraccion]:
+            where_clauses: list[str] = []
+            params: list[str | int] = []
+
+            if name:
+                where_clauses.append("name LIKE ?")
+                params.append(f"%{name}%")
+            if date_from:
+                where_clauses.append("fecha >= ?")
+                params.append(date_from)
+            if date_to:
+                where_clauses.append("fecha <= ?")
+                params.append(date_to)
+            if ciudad_page_id:
+                where_clauses.append("ciudad_page_id = ?")
+                params.append(ciudad_page_id)
+            if cronograma_page_id:
+                where_clauses.append("cronograma_page_id = ?")
+                params.append(cronograma_page_id)
+
+            where_sql = " AND ".join(where_clauses) if where_clauses else "1=1"
+
+            async with self.conn.execute(
+                f"SELECT page_id, name, fecha, cronograma_page_id, ciudad_page_id, "
+                f"created_at, updated_at "
+                f"FROM atracciones WHERE {where_sql} "
+                f"ORDER BY fecha ASC LIMIT ? OFFSET ?",
+                (*params, limit, offset),
+            ) as cursor:
+                rows = await cursor.fetchall()
+                return [
+                    Atraccion(
+                        page_id=str(row[0]),
+                        name=row[1],
+                        fecha=row[2],
+                        cronograma_page_id=row[3],
+                        ciudad_page_id=row[4],
+                        created_at=str(row[5]),
+                        updated_at=str(row[6]),
+                    )
+                    for row in rows
+                ]
+
+        return await self._retry_operation("list_atracciones", _list)
+
     def _validate_table_name(self, table_name: str) -> None:
         allowed = {
             "atracciones",

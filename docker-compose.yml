@@ -1,0 +1,13 @@
+services:
+  nhook:
+    image: localhost/notion-hook:latest
+    container_name: nhook
+    restart: unless-stopped
+    ports:
+      - "8765:8000"
+    env_file: .env
+    environment:
+      PYTHONUNBUFFERED: "1"
+      DATABASE_PATH: /data/notion_hook.db
+    volumes:
+      - ./data:/data

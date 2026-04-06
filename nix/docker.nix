@@ -25,5 +25,15 @@ pkgs.dockerTools.buildImage {
     paths = [ dockerApp uvSet.python ] ++ uvSet.dependencies;
     pathsToLink = [ "/bin" "/lib" ];
   };
-  config = { Entrypoint = [ "${dockerApp}/bin/nhook" ]; };
+
+  extraCommands = ''
+    mkdir -p data
+  '';
+
+  config = {
+    Entrypoint = [ "${dockerApp}/bin/nhook" ];
+    WorkingDir = "/data";
+    Volumes = { "/data" = { }; };
+    Env = [ "PYTHONUNBUFFERED=1" ];
+  };
 }

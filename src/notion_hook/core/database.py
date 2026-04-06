@@ -91,6 +91,7 @@ class DatabaseClient:
                 category TEXT,
                 amount REAL,
                 date DATE,
+                date_end DATE,
                 persona TEXT,
                 ciudad_page_id TEXT REFERENCES ciudades(page_id) ON DELETE SET NULL,
                 ciudad TEXT,
@@ -207,6 +208,8 @@ class DatabaseClient:
             await self.conn.execute("ALTER TABLE gastos ADD COLUMN ciudad_page_id TEXT")
         if "ciudad" not in existing:
             await self.conn.execute("ALTER TABLE gastos ADD COLUMN ciudad TEXT")
+        if "date_end" not in existing:
+            await self.conn.execute("ALTER TABLE gastos ADD COLUMN date_end DATE")
 
         # Check if FK constraint exists from ciudad_page_id to ciudades
         async with self.conn.execute("PRAGMA foreign_key_list(gastos)") as cursor:
@@ -230,6 +233,7 @@ class DatabaseClient:
                     category TEXT,
                     amount REAL,
                     date DATE,
+                    date_end DATE,
                     persona TEXT,
                     ciudad_page_id TEXT REFERENCES ciudades(page_id) ON DELETE SET NULL,
                     ciudad TEXT,
@@ -243,7 +247,7 @@ class DatabaseClient:
                 """
                 INSERT INTO gastos_new
                 SELECT page_id, payment_method, description, category, amount, date,
-                       persona,
+                       date_end, persona,
                        CASE
                            WHEN ciudad_page_id IS NULL THEN NULL
                            WHEN EXISTS (
@@ -425,7 +429,8 @@ class DatabaseClient:
             async with self.conn.execute(
                 """
                 SELECT page_id, payment_method, description, category,
-                amount, date, created_at, updated_at, persona, ciudad_page_id, ciudad
+                amount, date, date_end, created_at, updated_at, persona,
+                ciudad_page_id, ciudad
                 FROM gastos
                 WHERE page_id = ?
                 """,
@@ -440,11 +445,12 @@ class DatabaseClient:
                         category=row[3],
                         amount=row[4],
                         date=row[5],
-                        created_at=row[6],
-                        updated_at=row[7],
-                        persona=row[8],
-                        ciudad_page_id=row[9],
-                        ciudad=row[10],
+                        date_end=row[6],
+                        created_at=row[7],
+                        updated_at=row[8],
+                        persona=row[9],
+                        ciudad_page_id=row[10],
+                        ciudad=row[11],
                     )
             return None
 
@@ -515,13 +521,14 @@ class DatabaseClient:
                     category,
                     amount,
                     date,
+                    date_end,
                     persona,
                     ciudad_page_id,
                     ciudad,
                     created_at,
                     updated_at
                 )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     gasto.page_id,
@@ -530,6 +537,7 @@ class DatabaseClient:
                     gasto.category,
                     gasto.amount,
                     gasto.date,
+                    gasto.date_end,
                     gasto.persona,
                     gasto.ciudad_page_id,
                     gasto.ciudad,
@@ -558,7 +566,7 @@ class DatabaseClient:
             cursor = await self.conn.execute(
                 """UPDATE gastos
                 SET payment_method = ?, description = ?, category = ?, amount = ?,
-                date = ?, persona = ?, ciudad_page_id = ?, ciudad = ?,
+                date = ?, date_end = ?, persona = ?, ciudad_page_id = ?, ciudad = ?,
                 updated_at = ? WHERE page_id = ?""",
                 (
                     gasto.payment_method,
@@ -566,6 +574,7 @@ class DatabaseClient:
                     gasto.category,
                     gasto.amount,
                     gasto.date,
+                    gasto.date_end,
                     gasto.persona,
                     gasto.ciudad_page_id,
                     gasto.ciudad,
@@ -698,12 +707,14 @@ class DatabaseClient:
                     object,
                     object,
                     object,
+                    object,
                 ],
             ] = {}
             async with self.conn.execute(
                 f"""
                 SELECT page_id, payment_method, description,
-                category, amount, date, persona, ciudad_page_id, ciudad, updated_at
+                category, amount, date, date_end, persona,
+                ciudad_page_id, ciudad, updated_at
                 FROM gastos
                 WHERE page_id IN ({placeholders})
                 """,
@@ -721,6 +732,7 @@ class DatabaseClient:
                         row[7],
                         row[8],
                         row[9],
+                        row[10],
                     )
 
             created = 0
@@ -739,10 +751,11 @@ class DatabaseClient:
                             and row[2] == gasto.category
                             and row[3] == gasto.amount
                             and row[4] == gasto.date
-                            and row[5] == gasto.persona
-                            and row[6] == gasto.ciudad_page_id
-                            and row[7] == gasto.ciudad
-                            and row[8] == gasto.updated_at
+                            and row[5] == gasto.date_end
+                            and row[6] == gasto.persona
+                            and row[7] == gasto.ciudad_page_id
+                            and row[8] == gasto.ciudad
+                            and row[9] == gasto.updated_at
                         ):
                             skipped += 1
                             continue
@@ -751,7 +764,7 @@ class DatabaseClient:
                             await self.conn.execute(
                                 """UPDATE gastos
                                 SET payment_method = ?, description = ?,
-                                category = ?, amount = ?, date = ?,
+                                category = ?, amount = ?, date = ?, date_end = ?,
                                 persona = ?, ciudad_page_id = ?, ciudad = ?,
                                 updated_at = ? WHERE page_id = ?""",
                                 (
@@ -760,6 +773,7 @@ class DatabaseClient:
                                     gasto.category,
                                     gasto.amount,
                                     gasto.date,
+                                    gasto.date_end,
                                     gasto.persona,
                                     gasto.ciudad_page_id,
                                     gasto.ciudad,
@@ -784,13 +798,14 @@ class DatabaseClient:
                                     category,
                                     amount,
                                     date,
+                                    date_end,
                                     persona,
                                     ciudad_page_id,
                                     ciudad,
                                     created_at,
                                     updated_at
                                 )
-                                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                                 """,
                                 (
                                     gasto.page_id,
@@ -799,6 +814,7 @@ class DatabaseClient:
                                     gasto.category,
                                     gasto.amount,
                                     gasto.date,
+                                    gasto.date_end,
                                     gasto.persona,
                                     gasto.ciudad_page_id,
                                     gasto.ciudad,
@@ -1631,7 +1647,8 @@ class DatabaseClient:
             async with self.conn.execute(
                 """
                 SELECT page_id, payment_method, description, category,
-                amount, date, created_at, updated_at, persona, ciudad_page_id, ciudad
+                amount, date, date_end, created_at, updated_at, persona,
+                ciudad_page_id, ciudad
                 FROM gastos
                 ORDER BY created_at DESC
                 LIMIT ? OFFSET ?
@@ -1647,11 +1664,12 @@ class DatabaseClient:
                         category=row[3],
                         amount=row[4],
                         date=row[5],
-                        created_at=row[6],
-                        updated_at=row[7],
-                        persona=row[8],
-                        ciudad_page_id=row[9],
-                        ciudad=row[10],
+                        date_end=row[6],
+                        created_at=row[7],
+                        updated_at=row[8],
+                        persona=row[9],
+                        ciudad_page_id=row[10],
+                        ciudad=row[11],
                     )
                     for row in rows
                 ]
@@ -1780,7 +1798,7 @@ class DatabaseClient:
 
             async with self.conn.execute(
                 f"SELECT page_id, payment_method, description, category, "
-                f"amount, date, created_at, updated_at, persona, "
+                f"amount, date, date_end, created_at, updated_at, persona, "
                 f"ciudad_page_id, ciudad "
                 f"FROM gastos WHERE {where_sql} {order_final} LIMIT ? OFFSET ?",
                 (*params, limit, offset),
@@ -1794,11 +1812,12 @@ class DatabaseClient:
                         category=row[3],
                         amount=row[4],
                         date=row[5],
-                        created_at=row[6],
-                        updated_at=row[7],
-                        persona=row[8],
-                        ciudad_page_id=row[9],
-                        ciudad=row[10],
+                        date_end=row[6],
+                        created_at=row[7],
+                        updated_at=row[8],
+                        persona=row[9],
+                        ciudad_page_id=row[10],
+                        ciudad=row[11],
                     )
                     for row in rows
                 ]

@@ -65,7 +65,10 @@ class CreateGastoRequest(BaseModel):
 
     expense: str = Field(..., description="Expense description", min_length=1)
     amount: float = Field(..., description="Amount", gt=0)
-    date: str | None = Field(None, description="Date in YYYY-MM-DD format")
+    date: str | None = Field(None, description="Date start in YYYY-MM-DD format")
+    date_end: str | None = Field(
+        None, description="Date end in YYYY-MM-DD format (for date ranges)"
+    )
     category: list[str] | str | None = Field(None, description="Category(s)")
     payment_method: str | None = Field(None, description="Payment method")
     persona: list[str] | str | None = Field(None, description="Persona(s)")
@@ -80,6 +83,9 @@ class GastoResponse(BaseModel):
     category: str | None = None
     amount: float | None = None
     date: str | None = None
+    date_end: str | None = Field(
+        None, description="Date end in YYYY-MM-DD format (for date ranges)"
+    )
     persona: str | None = None
     created_at: str = Field(..., description="Creation timestamp (ISO format)")
     updated_at: str = Field(..., description="Last update timestamp (ISO format)")
@@ -118,6 +124,7 @@ async def create_gasto(
             expense=request.expense,
             amount=request.amount,
             date=request.date,
+            date_end=request.date_end,
             category=request.category,
             payment_method=request.payment_method,
             persona=request.persona,
@@ -211,6 +218,7 @@ async def list_gastos(
                 category=g.category,
                 amount=g.amount,
                 date=g.date,
+                date_end=g.date_end,
                 persona=g.persona,
                 created_at=g.created_at,
                 updated_at=g.updated_at,
@@ -439,6 +447,7 @@ async def get_gasto(
         category=gasto.category,
         amount=gasto.amount,
         date=gasto.date,
+        date_end=gasto.date_end,
         persona=gasto.persona,
         created_at=gasto.created_at,
         updated_at=gasto.updated_at,

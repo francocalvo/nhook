@@ -16,7 +16,10 @@ class Gasto(BaseModel):
     description: str | None = Field(None, description="Description (from Expense)")
     category: str | None = Field(None, description="Category (comma-separated)")
     amount: float | None = Field(None, description="Amount")
-    date: str | None = Field(None, description="Date in YYYY-MM-DD format")
+    date: str | None = Field(None, description="Date start in YYYY-MM-DD format")
+    date_end: str | None = Field(
+        None, description="Date end in YYYY-MM-DD format (for date ranges)"
+    )
     persona: str | None = Field(
         None, description="Persona (comma-separated if multi-select)"
     )
@@ -106,12 +109,21 @@ class Gasto(BaseModel):
                 return start
             return None
 
+        def _extract_date_end(prop: dict[str, Any]) -> str | None:
+            date_obj = prop.get("date")
+            if isinstance(date_obj, dict) and isinstance(date_obj.get("end"), str):
+                end = date_obj["end"]
+                if "T" in end:
+                    return end.split("T", 1)[0]
+                return end
+            return None
+
         payment_method = None
         if pm_prop := _first_property("Payment Method", "payment_method"):
             payment_method = _extract_select_name(pm_prop)
 
         description = None
-        if desc_prop := _first_property("Expense", "expense"):
+        if desc_prop := _first_property("Nombre", "nombre", "Expense", "expense"):
             description = _extract_text(desc_prop)
 
         category = None
@@ -121,12 +133,14 @@ class Gasto(BaseModel):
                 category = _extract_select_name(cat_prop)
 
         amount = None
-        if amount_prop := _first_property("Amount", "amount"):
+        if amount_prop := _first_property("Cantidad", "cantidad", "Amount", "amount"):
             amount = _extract_number(amount_prop)
 
         date = None
+        date_end = None
         if date_prop := _first_property("Date", "date"):
             date = _extract_date_start(date_prop)
+            date_end = _extract_date_end(date_prop)
 
         persona = None
         if persona_prop := _first_property("Persona", "persona"):
@@ -151,6 +165,7 @@ class Gasto(BaseModel):
             category=category,
             amount=amount,
             date=date,
+            date_end=date_end,
             persona=persona,
             ciudad_page_id=ciudad_page_id,
             ciudad=ciudad,

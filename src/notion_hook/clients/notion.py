@@ -366,6 +366,7 @@ class NotionClient:
         expense: str,
         amount: float,
         date: str | None = None,
+        date_end: str | None = None,
         category: list[str] | str | None = None,
         payment_method: str | None = None,
         persona: list[str] | str | None = None,
@@ -375,7 +376,8 @@ class NotionClient:
         Args:
             expense: The expense/description text.
             amount: The amount value.
-            date: Date string in YYYY-MM-DD format.
+            date: Date start string in YYYY-MM-DD format.
+            date_end: Date end string in YYYY-MM-DD format (for date ranges).
             category: Category value(s) - list for multi-select, string for select.
             payment_method: Payment method value.
             persona: Persona value(s) - list for multi-select, string for select.
@@ -387,15 +389,18 @@ class NotionClient:
             NotionClientError: If the request fails.
         """
         properties: dict[str, Any] = {
-            "Expense": {
+            "Nombre": {
                 "type": "title",
                 "title": [{"text": {"content": expense}}],
             },
-            "Amount": {"type": "number", "number": amount},
+            "Cantidad": {"type": "number", "number": amount},
         }
 
         if date:
-            properties["Date"] = {"type": "date", "date": {"start": date}}
+            date_value: dict[str, str] = {"start": date}
+            if date_end:
+                date_value["end"] = date_end
+            properties["Date"] = {"type": "date", "date": date_value}
 
         if category:
             if isinstance(category, list):
